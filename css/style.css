@@ -1,0 +1,13 @@
+.horitzontal-navbar ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+}
+
+.horitzontal-navbar li {
+    display: inline;
+}
+
+.personal-info p {
+  margin:0 0 2px;
+}
