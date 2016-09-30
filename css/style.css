@@ -13,24 +13,24 @@
 }
 
 
-.personal-info a {
+a {
   transition: color .4s;
   color: #265C83;
 }
 
-.personal-info a:link, a:visited {
+a:link, a:visited {
   color: #265C83;
 }
 
-.personal-info a:hover {
+a:hover {
   color: #7FDBFF;
 }
 
-.personal-info a:active {
+a:active {
   transition: color .3s;
   color: #007BE6;
 }
 
-.personal-info .link {
+.link {
   text-decoration: none;
 }
