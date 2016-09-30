@@ -11,3 +11,26 @@
 .personal-info p {
   margin:0 0 2px;
 }
+
+
+.personal-info a {
+  transition: color .4s;
+  color: #265C83;
+}
+
+.personal-info a:link, a:visited {
+  color: #265C83;
+}
+
+.personal-info a:hover {
+  color: #7FDBFF;
+}
+
+.personal-info a:active {
+  transition: color .3s;
+  color: #007BE6;
+}
+
+.personal-info .link {
+  text-decoration: none;
+}
