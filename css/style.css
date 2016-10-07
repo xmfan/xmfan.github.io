@@ -35,3 +35,13 @@ a:active {
 ul {
   -webkit-padding-start: 20px;
 }
+
+.horizontal-navbar ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+}
+
+.horizontal-navbar li {
+    display: inline;
+}
