@@ -1,25 +1,22 @@
-.horitzontal-navbar ul {
-    list-style-type: none;
-    margin: 0;
-    padding: 0;
+h1, h2 {
+  color: #4d4d4d;
 }
 
-.horitzontal-navbar li {
-    display: inline;
+.personal-info {
+  margin: 0 0 20px;
 }
 
 .personal-info p {
-  margin:0 0 2px;
+  margin: 0 0 2px;
 }
-
 
 a {
   transition: color .4s;
-  color: #265C83;
+  color: #246b8f;
 }
 
 a:link, a:visited {
-  color: #265C83;
+  color: #246b8f;
 }
 
 a:hover {
@@ -33,4 +30,8 @@ a:active {
 
 .link {
   text-decoration: none;
+}
+
+ul {
+  -webkit-padding-start: 20px;
 }
