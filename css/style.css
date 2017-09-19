@@ -36,6 +36,12 @@ ul {
   -webkit-padding-start: 20px;
 }
 
+.horizontal-navbar-wrapper {
+    width:auto;
+    text-align:right;
+    padding-bottom:30px;
+}
+
 .horizontal-navbar ul {
     list-style-type: none;
     margin: 0;

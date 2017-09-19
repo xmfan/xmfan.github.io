@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="chrome=1">
-    <title>Simon Fan</title>
+    <title>simonfan</title>
 
-    <link rel="stylesheet" href="css/template.css">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/template.css?nocache=true">
+    <link rel="stylesheet" href="css/style.css?nocache=true">
     <meta name="viewport" content="width=device-width">
   </head>
 
@@ -14,34 +14,57 @@
     <div class="wrapper">
       <header>
         <h1>simon fan</h1>
-        <p>student, intern, aspiring creative<br>uwaterloo computer science</p>
+
+        <p>
+          uwaterloo computer science<br>
+          data sci | data eng | web dev
+        </p>
+
         <div class="personal-info">
           <p><a href="https://www.linkedin.com/in/xmfan">linkedin/xmfan</a></p>
           <p><a href="https://github.com/xmfan">github/xmfan</a></p>
-	  <p><a href="https://www.kaggle.com/simonfan">kaggle/simonfan</a></p>
+          <p><a href="https://www.kaggle.com/simonfan">kaggle/simonfan</a></p>
           <p><a href="mailto:xmfan@edu.uwaterloo.ca">xmfan@edu.uwaterloo.ca</a></p>
-          <p><a href="tel:+15197298879">+1 (519) 729-8879</a></p>
+          <p><a href="tel:+13472086556">+1 (347) 208-6556</a></p>
         </div>
       </header>
 
-      <section>
-	<h2>what i'm up to</h2>
-	<p>making this website more contentful (`jekyll` branch on this github repo)</p>
-	<p>applying for internships at various interests</p>
-
-        <!-- <div class="horizontal-navbar">
+      <div class="horizontal-navbar-wrapper">
+        <div class="horizontal-navbar">
           <ul>
-            <li><a href="/resume">resume</a></li>
-            <li><a href="/blog">blog</a></li>
+            <li><a id="default" href="#about" onclick="show('about')">about</a></li> |
+            <li><a href="#portfolio" onclick="show('portfolio')">portfolio</a></li> |
+            <li><a href="/resume.pdf">resume</a></li> |
+            <li><span>blog (soon™)</span></li>
           </ul>
-        </div> -->
-
-      </section>
-
-      <footer>
-        <!--<p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://github.com/orderedlist">orderedlist</a></small></p>-->
-      </footer>
+        </div>
+      </div>
+      <section id="content"></section>
     </div>
+
     <script src="js/scale.fix.js"></script>
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js"
+            integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4="
+            crossorigin="anonymous"></script>
+
+    <script>
+      $(document).ready(function() {
+        // route
+        switch (window.location.hash) {
+          case '#about':
+            show('about');
+            break;
+          case '#portfolio':
+            show('portfolio');
+            break;
+          default:
+            show('about');
+        }
+      });
+
+      function show(tab) {
+        $('#content').load('templates/' + tab + '.html');
+      }
+    </script>
   </body>
 </html>
