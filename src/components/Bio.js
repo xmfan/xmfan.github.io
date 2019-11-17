@@ -1,11 +1,12 @@
 import React from 'react'
 import styles from './Bio.module.css'
 import { getGravatarURL } from '../utils/getGravatarURL'
+import { Link } from 'react-navi'
 
 function Bio(props) {
   let photoURL = getGravatarURL({
-    email: "test1@example.com",
-    size: 56,
+    email: "simon.xmfan@gmail.com",
+    size: 60,
   })
 
   return (
@@ -13,19 +14,16 @@ function Bio(props) {
       ${styles.Bio}
       ${props.className || ''}
     `}>
-      <img src={photoURL} alt="Me" />
+      <Link to={props.blogRoot}>
+        <img src={photoURL} alt="Me" />
+      </Link>
       <p>
-        Create a blog with a single command, by{' '}
-        <a href="https://twitter.com/james_k_nelson/">James K Nelson</a>.
+        <b>Simon Fan (樊昕明)</b>
         <br />
-        Themed after Gatsby's blog starter and Dan Abramov's{' '}
-        <a href="https://overreacted.io/">overreacted.io</a>.<br />
-        Based on{' '}
-        <a href="https://facebook.github.io/create-react-app/">
-          create-react-app
-        </a>
-        , <a href="https://mdxjs.com/">MDX</a>, and{' '}
-        <a href="https://frontarm.com/navi/">Navi</a>.
+        Mind-wandering
+        <br />
+        <small><Link href="/about" className={styles.nostyle}>About</Link></small>
+        <br />
       </p>
     </div>
   )

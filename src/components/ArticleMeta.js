@@ -17,7 +17,7 @@ function ArticleMeta({ blogRoot, meta, readingTime }) {
         </span>
       </React.Fragment>
   }
-      
+
   return (
     <small className={styles.ArticleMeta}>
       <time dateTime={meta.date.toUTCString()}>{formatDate(meta.date)}</time>
@@ -29,7 +29,7 @@ function ArticleMeta({ blogRoot, meta, readingTime }) {
           <ul className={styles.tags}>
             {meta.tags.map(tag =>
               <li key={tag}>
-                <Link href={join(blogRoot, 'tags', tag)}>{tag}</Link>
+                <Link href={join(blogRoot, 'tags', tag)} className={styles.nostyle}>{tag}</Link>
               </li>
             )}
           </ul>

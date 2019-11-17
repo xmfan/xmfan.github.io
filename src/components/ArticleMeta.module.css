@@ -9,3 +9,7 @@
 .tags li:not(:first-child)::before {
   content: ', ';
 }
+
+.nostyle {
+  text-decoration: none;
+}

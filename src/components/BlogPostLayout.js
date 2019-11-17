@@ -1,7 +1,6 @@
 import React from 'react'
 import { Link, useCurrentRoute, useView } from 'react-navi'
 import { MDXProvider } from '@mdx-js/react'
-import siteMetadata from '../siteMetadata'
 import ArticleMeta from './ArticleMeta'
 import Bio from './Bio'
 import styles from './BlogPostLayout.module.css'
@@ -19,9 +18,9 @@ function BlogPostLayout({ blogRoot }) {
       {head}
       <article className={styles.container}>
         <header className={styles.header}>
-          <h1 className={styles.title}>
+          <h2 className={styles.title}>
             <Link href={url.pathname}>{title}</Link>
-          </h1>
+          </h2>
           <ArticleMeta
             blogRoot={blogRoot}
             meta={data}
@@ -38,12 +37,7 @@ function BlogPostLayout({ blogRoot }) {
           <MDXComponent />
         </MDXProvider>
         <footer className={styles.footer}>
-          <h3 className={styles.title}>
-            <Link href={blogRoot}>
-              {siteMetadata.title}
-            </Link>
-          </h3>
-          <Bio className={styles.bio} />
+          <Bio className={styles.bio} blogRoot={blogRoot} />
           <section className={styles.links}>
             {
               data.previousDetails &&
