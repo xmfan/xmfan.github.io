@@ -1,0 +1,2 @@
+(window.webpackJsonp=window.webpackJsonp||[]).push([[5],{53:function(n,t,e){"use strict";e.r(t);var i=e(2);t.default=i.m({title:"About",getView:function(){return e.e(7).then(e.bind(null,48))}})}}]);
+//# sourceMappingURL=5.7a337ae4.chunk.js.map
