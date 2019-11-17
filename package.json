@@ -2,9 +2,11 @@
   "name": "xmfan.github.io",
   "version": "1.0.0",
   "private": true,
+  "homepage": "https://xmfan.github.io/",
   "dependencies": {
     "blueimp-md5": "^2.3.0",
     "feed": "^2.0.2",
+    "gh-pages": "^2.1.1",
     "import-all.macro": "^2.0.3",
     "lodash": "^4.17.11",
     "navi": "^0.13.3",
@@ -25,8 +27,8 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "serve": "navi-scripts serve",
-    "deploy": "netlify deploy --dir=build",
-    "deploy:prod": "netlify deploy --dir=build --prod"
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d build"
   },
   "eslintConfig": {
     "extends": "react-app"
