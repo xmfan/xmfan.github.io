@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MoonEP routing flow — live · Simon Fan</title>
-<meta name="description" content="An interactive model of one MoonEP MoE layer: router skew, the planner's greedy balance, expert weight traffic, and per-rank layer timing.">
+<meta name="description" content="An interactive model of one MoonEP MoE layer: router skew, the planner's greedy balance, expert weight traffic, and per-rank timing of the routed-expert path.">
 <link rel="alternate" type="application/rss+xml" title="Simon Fan" href="/feed.xml">
 <style>
   :root {
@@ -168,6 +168,10 @@
     --s7b:color-mix(in oklab, var(--s7) 52%, white); --s8b:color-mix(in oklab, var(--s8) 52%, white);
   }
   #rankLoad th { position:sticky; top:0; background:var(--surface-1); }
+  .scrollwin { overflow-y:scroll; scrollbar-gutter:stable; }
+  .scrollwin::-webkit-scrollbar { width:10px; }
+  .scrollwin::-webkit-scrollbar-track { background:var(--code-bg); border-radius:5px; }
+  .scrollwin::-webkit-scrollbar-thumb { background:var(--baseline); border-radius:5px; border:2px solid var(--code-bg); }
   /* ---------- sticky hyperparameter dock ---------- */
   #flowgrid { display:grid; grid-template-columns:270px minmax(0,1fr); gap:20px; align-items:start; }
   #dock {
@@ -184,8 +188,8 @@
   #dock .paramrow .v { min-width:44px; text-align:right; }
   #dock .btn { width:100%; }
   #dock .btnrow { display:flex; gap:6px; }
-  #dock .btnrow #scSkew { flex:1; }
-  #dock .btnrow #flowReseed { width:auto; flex:0 0 auto; padding:6px 11px; }
+  #dock .btnrow .btn { flex:1; width:auto; }
+  #dock .btnrow #flowReseed { flex:0 0 auto; padding:6px 11px; }
   #dock .pill { display:block; text-align:center; margin-top:6px; white-space:normal; }
   @media (max-width:1000px){ #flowgrid{grid-template-columns:1fr} #dock{position:static;max-height:none} }
   /* ---------- blog chrome ---------- */
@@ -206,7 +210,7 @@
 <p class="lead">
 An interactive model of one MoonEP MoE layer. Set the shape, drag the router skew, and watch:
 how the router loads each expert, how the planner's greedy balance repairs the imbalance,
-which expert weights cross which link, and how long the layer takes — rank by rank, barrier
+which expert weights cross which link, and how long the routed-expert path takes — rank by rank, barrier
 waits included. Everything is computed by a faithful JS port of MoonEP's planning kernel
 (revision <code>2bd860b</code>, 2026-08-13).
 </p>
@@ -224,21 +228,29 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
 <div id="flowgrid">
 <aside id="dock">
   <div class="dock-title">Hyperparameters</div>
-  <div class="kbd-note" style="margin:2px 0 6px">Defaults = <b>Kimi K3</b>'s MoE shape: 896 routed
-  experts, top-16, expert hidden 3584 → FFN 3072 (the repo's own K3 benchmark shape). Weights are
-  modeled bf16; K3 ships MXFP4 for inference, ≈4× smaller copies. Its 2 shared experts don't route,
-  so they appear only in the runtime note.</div>
+  <div style="font-size:12px;color:var(--ink-2);margin:2px 0 4px">presets
+  <span style="color:var(--muted);font-size:11px">model shape + precision; topology stays as set</span></div>
+  <div class="btnrow" style="margin-bottom:8px">
+    <button class="btn" id="psMoon" title="bench_vs_deepep.py defaults: 384 experts, top-8, H 7168 → H′ 2048, train bf16/fp32">MoonEP</button>
+    <button class="btn" id="psK3" title="Kimi K3 as shipped: 896 experts, top-16, expert hidden 3584 → H′ 3072, infer MXFP4">Kimi K3</button>
+    <button class="btn" id="psDsv3" title="DeepSeek-V3: 256 experts, top-8, H 7168 → H′ 2048, train bf16/fp32">DSv3</button>
+  </div>
   <div class="paramrow" id="flowParams">
     <label><span class="pn"><b>S</b> tokens per rank</span><input type="range" min="6" max="13" step="1" value="12" data-p="S" data-pow="1"><span class="v" data-v="S"></span></label>
-    <label><span class="pn"><b>K</b> top-k per token</span><input type="range" min="2" max="16" step="1" value="16" data-p="K"><span class="v" data-v="K"></span></label>
-    <label><span class="pn"><b>E</b> routed experts</span><input type="range" min="16" max="896" step="16" value="896" data-p="E"><span class="v" data-v="E"></span></label>
-    <label><span class="pn"><b>H</b> expert hidden size</span><input type="range" min="2048" max="8192" step="256" value="3584" data-p="H"><span class="v" data-v="H"></span></label>
-    <label><span class="pn"><b>H&prime;</b> FFN intermediate</span><input type="range" min="512" max="4096" step="256" value="3072" data-p="Hp"><span class="v" data-v="Hp"></span></label>
+    <label><span class="pn"><b>K</b> top-k per token</span><input type="range" min="2" max="16" step="1" value="8" data-p="K"><span class="v" data-v="K"></span></label>
+    <label><span class="pn"><b>E</b> routed experts</span><input type="range" min="16" max="896" step="16" value="384" data-p="E"><span class="v" data-v="E"></span></label>
+    <label><span class="pn"><b>H</b> expert hidden size</span><input type="range" min="2048" max="8192" step="256" value="7168" data-p="H"><span class="v" data-v="H"></span></label>
+    <label><span class="pn"><b>H&prime;</b> FFN intermediate</span><input type="range" min="512" max="4096" step="256" value="2048" data-p="Hp"><span class="v" data-v="Hp"></span></label>
     <label><span class="pn"><b>R</b> EP ranks</span><input type="range" min="1" max="6" step="1" value="3" data-p="R" data-pow="1"><span class="v" data-v="R"></span></label>
     <label><span class="pn">node size <span class="pu">GPUs per NVLink node</span></span><input type="range" min="1" max="4" step="1" value="3" data-p="ns" data-pow="1"><span class="v" data-v="ns"></span></label>
     <label><span class="pn">NVLink bandwidth <span class="pu">GB/s</span></span><input type="range" min="100" max="900" step="50" value="450" data-p="nvl"><span class="v" data-v="nvl"></span></label>
-    <label><span class="pn">InfiniBand bandwidth <span class="pu">Gb/s</span></span><input type="range" min="50" max="800" step="50" value="400" data-p="ib"><span class="v" data-v="ib"></span></label>
+    <label><span class="pn">InfiniBand bandwidth <span class="pu">GB/s per GPU · NDR = 50</span></span><input type="range" min="10" max="100" step="5" value="50" data-p="ib"><span class="v" data-v="ib"></span></label>
     <label><span class="pn">GEMM throughput <span class="pu">effective TFLOP/s</span></span><input type="range" min="100" max="3000" step="50" value="400" data-p="tf"><span class="v" data-v="tf"></span></label>
+    <span class="pn">precision</span>
+    <div class="btnrow">
+      <button class="btn on" id="prTrain" title="bf16 weights, fp32 grad reduce, fwd + bwd">train bf16/fp32</button>
+      <button class="btn" id="prInfer" title="packed 4-bit weights + scales, forward only">infer MXFP4</button>
+    </div>
   </div>
   <div class="paramrow">
     <label><span class="pn"><b>&alpha;</b> router skew</span><input type="range" id="flowskew" min="0" max="30" step="1" value="12"><span class="v" id="flowskewv"></span></label>
@@ -279,7 +291,7 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
   later move. That is the deliberate price of one-donor-per-receiver. Each move is realized by
   slicing off the donor's biggest experts, and every slice of a foreign expert ships one weight copy.
   </p>
-  <div id="balLog" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.9;background:var(--code-bg);border:1px solid var(--grid);border-radius:10px;padding:12px 16px;overflow-x:auto;max-height:420px;overflow-y:auto"></div>
+  <div id="balLog" class="scrollwin" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.9;background:var(--code-bg);border:1px solid var(--grid);border-radius:10px;padding:12px 16px;overflow-x:auto;max-height:420px"></div>
 
 
 
@@ -301,7 +313,7 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
       <div class="legendrow" id="tokMatLeg" style="margin-top:6px;gap:10px;font-size:11.5px"></div>
       <div style="font-size:12px;font-weight:600;margin:14px 0 0">entries routed to each rank's experts</div>
       <div style="font-size:11.5px;color:var(--muted);margin-bottom:2px">by the router, before balancing — after planning every rank will receive exactly S·K</div>
-      <div style="max-height:280px;overflow-y:auto;margin-top:4px">
+      <div class="scrollwin" style="max-height:280px;margin-top:4px">
         <table class="t" id="rankLoad" style="margin:0;font-size:12.5px"></table>
       </div>
     </div>
@@ -310,9 +322,11 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
     <span class="li" style="--lc:var(--s2)">expert weight copy, owner → receiver · width ∝ rows served · dashed = cross-node (IB)</span>
   </div>
   <div class="kbd-note" id="flowNote" style="margin:8px 0"></div>
-  <h3 style="margin:20px 0 4px">How long does one MoE layer take on this configuration?</h3>
+  <h3 style="margin:20px 0 4px">How long do one layer's routed experts take: dispatch → grouped GEMM → combine?</h3>
   <p style="font-size:13.5px;margin:2px 0 6px">
-  One forward + backward pass, rank by rank, <b>assuming no stragglers</b>. Every rank enters each
+  Just the routed-expert path of one layer — planning, dispatch, prefetch, grouped GEMM, combine
+  (attention, the router, and the shared experts are not in these bars) — forward + backward,
+  rank by rank, <b>assuming no stragglers</b>. Every rank enters each
   phase together, so all idle time is structural: a rank with lighter comm finishes early and
   stalls at the next cross-rank barrier until the busiest rank arrives. Same bandwidth and TFLOP
   sliders as everything else; hover any segment.
@@ -320,9 +334,8 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
   <div style="display:flex;gap:26px;flex-wrap:wrap;margin:10px 0 4px">
     <div class="stat"><div class="v" id="rtFwd"></div><div class="l">forward, critical path</div></div>
     <div class="stat"><div class="v" id="rtBwd"></div><div class="l">backward (excl. reduce_grad)</div></div>
-    <div class="stat"><div class="v" id="rtTot"></div><div class="l">layer total (fwd + bwd)</div></div>
+    <div class="stat"><div class="v" id="rtTot"></div><div class="l">routed-expert total (fwd + bwd)</div></div>
     <div class="stat"><div class="v" id="rtWait"></div><div class="l">avg barrier wait per rank</div></div>
-    <div class="stat"><div class="v" id="rtIB"></div><div class="l">layer total over IB</div></div>
   </div>
   <svg id="rankTime" width="100%" height="240" role="img" aria-label="per-rank layer timeline"></svg>
   <div class="legendrow">
@@ -339,14 +352,14 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
     GEMM is FLOPs ÷ effective TFLOP/s. The throughput slider is <b>effective</b>, so dtype and
     utilization fold into one number: H100 peaks ≈989 TFLOP/s dense BF16 and ≈1979 FP8; B200
     roughly 2.2×/4.5× that; a grouped GEMM over ragged expert segments typically lands at 40–60%
-    of peak. The default 400 ≈ H100 BF16 at ~40%. Comm bytes assume <b>bf16 everywhere</b>
-    (token row = H×2 B, weight copy = 3·H·H′×2 B) — FP8 dispatch would halve token bytes, and
-    K3's MXFP4 inference weights shrink copies ≈4×. Barrier hardware latency (~µs each) is not
-    modeled, so the gray is purely structural waiting. With <b>node size &lt; R</b>, ranks form NVLink islands and
+    of peak. The default 400 ≈ H100 BF16 at ~40%. Token rows are always bf16 (H×2 B — MoonEP has
+    no fp8 dispatch). Weight-copy bytes follow the <b>precision toggle</b>: train = 3·H·H′×2 B
+    bf16 plus a 2× fp32 reduce_grad return; infer = K3's MXFP4, packed 4-bit + one scale per 32
+    elements ≈ 3·H·H′×0.53 B, with no backward pass at all. Barrier hardware latency (~µs each)
+    is not modeled, so the gray is purely structural waiting. With <b>node size &lt; R</b>, ranks form NVLink islands and
     every cross-node edge is priced at the IB bandwidth; intra- and inter-node transfers ride
-    separate links, in parallel. The "over IB" tile is a counterfactual — the same layer if every
-    byte crossed the IB NICs. MoonEP itself <b>requires an NVLink/NVSwitch domain</b> (VMM symmetric
-    memory + <code>multimem</code>). Finally, the comm blocks need not be dead time: the K3
+    separate links, in parallel. Note that the multi-node topology is itself a what-if: MoonEP
+    <b>requires an NVLink/NVSwitch domain</b> (VMM symmetric memory + <code>multimem</code>). Finally, the comm blocks need not be dead time: the K3
     technical report overlaps this EP communication with the <b>two shared experts</b> each layer.
     Their GEMMs don't depend on routing, so they slot into exactly these comm windows — the
     timeline here shows the unoverlapped critical path.
@@ -412,7 +425,11 @@ function bindParams(rootSel,obj,onchange){
   onchange(); // one render after all params are read, not one per slider
 }
 /* ============ routing flow visualizer ============ */
-const FLOW={S:4096,K:16,E:896,R:8,ns:8,H:3584,Hp:3072,nvl:450,ib:400,tf:400};
+const FLOW={S:4096,K:8,E:384,R:8,ns:8,H:7168,Hp:2048,nvl:450,ib:400,tf:400,prec:'bf16'};
+const isInfer=()=>FLOW.prec==='mxfp4';
+// bf16 = 2 B/elem; MXFP4 = packed 4-bit + one E8M0 scale per 32 elems = 0.53125 B/elem
+const wtCopyB=()=>3*FLOW.H*FLOW.Hp*(isInfer()?0.53125:2);
+const precTag=()=>isInfer()?'mxfp4 packed + scales':'bf16';
 let flowSeed=99, flowScenario='skew', flowState=null;
 function computeFlow(alpha,scenario){
   const {S,K}=FLOW, R=FLOW.R;
@@ -539,12 +556,12 @@ function pairTip(s,d){
   const st=flowState, {H,Hp}=FLOW;
   const rows=st.tok[s][d], tokB=rows*H*2;
   const wl=st.wArrows.filter(a=>a.from===s&&a.to===d);
-  const wB=wl.length*3*H*Hp*2, tot=tokB+wB;
+  const wB=wl.length*wtCopyB(), tot=tokB+wB;
   const pct=x=>tot?Math.round(100*x/tot):0;
   let h=`<div class="tt-v">total ${fmtB(tot)} on this edge</div>`;
   h+=`<div>tokens: ${fmtN(rows)} rows × [${fmtN(H)}] bf16 = <b>${fmtB(tokB)}</b> (${pct(tokB)}%)</div>`;
   if(wl.length)
-    h+=`<div>weights: ${wl.map(a=>'e'+a.e).join(', ')} — per expert gate/up [${fmtN(H)}×${fmtN(Hp)}] + down [${fmtN(Hp)}×${fmtN(H)}] bf16 = 3 × ${fmtB(H*Hp*2)} → <b>${fmtB(wB)}</b> (${pct(wB)}%)</div>`;
+    h+=`<div>weights: ${wl.map(a=>'e'+a.e).join(', ')} — per expert gate/up [${fmtN(H)}×${fmtN(Hp)}] + down [${fmtN(Hp)}×${fmtN(H)}] ${precTag()} = 3 × ${fmtB(wtCopyB()/3)} → <b>${fmtB(wB)}</b> (${pct(wB)}%)</div>`;
   else
     h+=`<div>weights: none on this edge (0%)</div>`;
   h+=`<div>link: ${crossNode(s,d)?'cross-node \u2014 InfiniBand':'same node \u2014 NVLink'}</div>`;
@@ -563,7 +580,7 @@ function drawFlow(){
   const nodeR=Math.max(6,Math.min(17,Math.floor(Math.PI*rad/R)-2)); // shrink nodes so 72 fit
   const pos=[]; for(let r=0;r<R;r++){const a=angOf(r);pos.push({x:cx+rad*Math.cos(a),y:cy+rad*Math.sin(a)});}
   const {H,Hp}=FLOW;
-  const wtBytes=3*H*Hp*2;
+  const wtBytes=wtCopyB();
   const P=p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`;
   const pt2=(rr,th)=>({x:cx+rr*Math.cos(th),y:cy+rr*Math.sin(th)});
   const nsz=Math.max(1,Math.min(FLOW.ns||R,R));
@@ -608,7 +625,7 @@ function drawFlow(){
   wArrows.forEach(a=>{
     const w=2+7*Math.sqrt(a.n/maxServed);   // width ∝ tokens the copy serves, clamped 2..9
     arrow(pos[a.from],pos[a.to],'--s2',w,
-      `<div class="tt-t">r${a.from} → r${a.to} · expert e${a.e} weights (serves ${fmtN(a.n)} rows)</div>${pairTip(a.from,a.to)}<div>grad reduce sends ${fmtB(wtBytes*2)} back per expert (fp32 = 2×)</div>`,
+      `<div class="tt-t">r${a.from} → r${a.to} · expert e${a.e} weights (serves ${fmtN(a.n)} rows)</div>${pairTip(a.from,a.to)}${isInfer()?'':`<div>grad reduce sends ${fmtB(3*H*Hp*4)} back per expert (fp32)</div>`}`,
       crossNode(a.from,a.to));
   });
   for(let r=0;r<R;r++){
@@ -688,7 +705,7 @@ function renderFlow(){
   const mesh=drawFlow()||{pairs:0,meanV:0};
   const {R,tok,wArrows}=st,{H,Hp,nvl,ib}=FLOW;
   $('#flowvio').textContent=`maxvio = ${st.maxvio.toFixed(2)} · ${st.dupExperts} dup experts · ${st.nMoves} moves`;
-  const wtB=3*H*Hp*2;
+  const wtB=wtCopyB();
   const Eeff=st.E===FLOW.E?'':` E rounded to ${st.E} (= ${st.epn}·R so every rank owns ${st.epn}).`;
   const meshTxt=!mesh.pairs?'No cross-rank token traffic — every row stays local. '
     :`Token payload is not drawn in the ring — the matrix has every pair (${mesh.pairs} pairs, mean ${fmtN(mesh.meanV)} rows/pair). `;
@@ -699,7 +716,7 @@ function renderFlow(){
       return `<tr${hot||cold?' style="font-weight:600"':''}><td>${rankSw(d)}r${d}${hot?' ▲':cold?' ▼':''}</td><td class="n">${fmtN(v)}</td><td class="n">${(100*v/(R*st.N)).toFixed(1)}%</td><td class="n">${dlt>0?'+':''}${fmtN(dlt)}</td></tr>`;
     }).join('');
   $('#flowNote').innerHTML=meshTxt+
-    `Per-token payload row = H×2 B = ${fmtB(H*2)}; one duplicated expert = ${fmtB(wtB)}.${Eeff}`+
+    `Per-token payload row = H×2 B = ${fmtB(H*2)} (always bf16); one duplicated expert = ${fmtB(wtB)} (${precTag()}).${Eeff}`+
     (flowScenario==='hot'?` <b>Pathological mode:</b> every token on every rank picks rank 0's ${Math.min(FLOW.K,st.epn)===FLOW.K?'':'(and following) '}experts. ${FLOW.K>=st.epn?'With K ≥ epn, each hot expert is handed <i>wholly</i> to one destination. Token traffic becomes a perfectly uniform all-to-all: S·K/R rows on every pair, a flat matrix — the same density as balanced routing.':'With K &lt; epn, each hot expert is <i>split</i> across several destinations, and the source-rank-major cut hands each source its nearest slice. Much of the token traffic stays home — watch the matrix diagonal darken. (At K = 1 everything would stay local.)'} Either way, rank 0 becomes the weight server.`:'');
   renderExpertPanel();
   balStep=0;
@@ -712,13 +729,14 @@ function renderBalanceLog(){
   const st=flowState; if(!st)return;
   const el=$('#balLog'); if(!el)return;
   const {moves,takes,groupTokens,R}=st, CAP=st.N, {H,Hp}=FLOW;
-  const wtB=3*H*Hp*2;
+  const wtB=wtCopyB();
   const rk=r=>`${rankSw(r)}r${r}`;
   const n=moves.length;
   const k=balStep==null?n:Math.max(0,Math.min(balStep,n));
   const bal=groupTokens.map(v=>v-CAP);
   for(let i=0;i<k;i++){bal[moves[i].from]-=moves[i].n; bal[moves[i].to]=0;}
-  let html=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;position:sticky;top:-12px;background:var(--code-bg);padding:6px 0;z-index:2">`+
+  let html=`<div style="position:sticky;top:-12px;background:var(--code-bg);z-index:2;padding:6px 0 8px;margin-bottom:8px;border-bottom:1px solid var(--grid)">`+
+    `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">`+
     `<button class="btn" id="balPrev"${k<=0?' disabled':''}>\u25c0 back</button>`+
     `<button class="btn" id="balNext"${k>=n?' disabled':''}>next \u25b6</button>`+
     `<button class="btn" id="balAll"${k>=n?' disabled':''}>play all</button>`+
@@ -727,12 +745,12 @@ function renderBalanceLog(){
   const order=Array.from({length:R},(_,r)=>r).sort((a,b)=>bal[b]-bal[a]||a-b);
   let donor=0,recv=0;
   for(let r=1;r<R;r++){ if(bal[r]>bal[donor])donor=r; if(bal[r]<bal[recv])recv=r; } // strict compare keeps the LOWER rank on ties, like the kernel
-  html+=`<div style="display:flex;flex-wrap:wrap;gap:5px;margin:5px 0 3px">`+order.map(r=>{
+  html+=`<div${R>16?' class="scrollwin"':''} style="display:flex;flex-wrap:wrap;gap:5px;margin:5px 0 3px${R>16?';max-height:106px':''}">`+order.map(r=>{
     const b=bal[r];
     const isD=k<n&&r===donor&&b>0, isR=k<n&&r===recv&&b<0;
     const border=isD?'2px solid var(--s3)':isR?'2px solid var(--crit)':'1px solid var(--ring)';
     return `<span style="border:${border};${b===0?'opacity:.4;':''}border-radius:7px;padding:1px 7px;background:var(--surface-1)">${rk(r)} ${b===0?'0':(b>0?'+':'')+fmtN(b)}</span>`;
-  }).join('')+`</div>`;
+  }).join('')+`</div></div>`; // close chip row + sticky header (buttons + state + chips scroll together)
   html+=k<n
     ?`<div style="color:var(--muted);font-size:12px;margin-bottom:2px">next pick: <b style="color:var(--s3)">donor = argmax</b> (${rk(donor)}) and <b style="color:var(--crit)">receiver = argmin</b> (${rk(recv)}). No heap \u2014 a full warp-register rescan each iteration (<code>planning.py:258\u2013283</code>), ties \u2192 lower rank; zeroed ranks (faded) are out of the game for good.</div>`
     :`<div style="color:var(--muted);font-size:12px;margin-bottom:2px">the scan finds no positive surplus left \u2014 the loop exits.</div>`;
@@ -745,7 +763,7 @@ function renderBalanceLog(){
       html+=`; ${rk(m.from)} now ${m.donorAfter>0?'+'+fmtN(m.donorAfter):'<b>0</b>'}`;
     html+=`</div>`;
     takes.filter(t=>t.owner===m.from&&t.target===m.to).forEach(t=>{
-      html+=`<div style="color:var(--ink-2)${cur?';background:var(--code-hl);border-radius:6px;padding:1px 8px':''}">&nbsp;&nbsp;&nbsp;\u2514 expert e${t.e}: ${fmtN(t.take)} entries \u2192 ${rk(m.to)} \u00b7 weight copy ${rk(m.from)} \u2192 ${rk(m.to)} (${fmtB(wtB)}, + ${fmtB(2*wtB)} fp32 back in reduce_grad)</div>`;
+      html+=`<div style="color:var(--ink-2)${cur?';background:var(--code-hl);border-radius:6px;padding:1px 8px':''}">&nbsp;&nbsp;&nbsp;\u2514 expert e${t.e}: ${fmtN(t.take)} entries \u2192 ${rk(m.to)} \u00b7 weight copy ${rk(m.from)} \u2192 ${rk(m.to)} (${fmtB(wtB)}${isInfer()?'':`, + ${fmtB(3*H*Hp*4)} fp32 back in reduce_grad`})</div>`;
     });
   });
   if(k<n){
@@ -785,7 +803,7 @@ function renderExpertPanel(){
     return `<div class="tt-t">expert e${e} · owner r${owner}</div>`+
       `<div class="tt-v">${fmtN(T[e])} entries (${(100*T[e]/total).toFixed(1)}%): ${fmtN(loc)} stay on their source rank, ${fmtN(rem)} cross NVLink (≤ ${fmtB(rem*H*2)})</div>`+
       `<div>computed on: ${split.join(' · ')||'no tokens'}</div>`+
-      (reps.length?`<div>weights: copied to ${reps.map(d=>'r'+d).join(', ')} · ${fmtB(reps.length*3*H*Hp*2)}</div>`:`<div>weights: stay on r${owner}</div>`);
+      (reps.length?`<div>weights: copied to ${reps.map(d=>'r'+d).join(', ')} · ${fmtB(reps.length*wtCopyB())}</div>`:`<div>weights: stay on r${owner}</div>`);
   };
   for(let e=0;e<E;e++){
     const owner=Math.floor(e/epn);
@@ -861,7 +879,7 @@ const rankSw=d=>`<span style="display:inline-block;width:8px;height:8px;border-r
 function rtModel(bwN,bwI){
   const st=flowState;
   const {R,tok,wArrows}=st, N=st.N, {H,Hp,tf}=FLOW;
-  const F=(tf||400)*1e12, HBM=3.3e12, wtB=3*H*Hp*2;
+  const F=(tf||400)*1e12, HBM=3.3e12, wtB=wtCopyB();
   const tPlan=20e-6, gemm=2*N*H*Hp*3/F;
   const per=[];
   for(let r=0;r<R;r++){
@@ -880,7 +898,7 @@ function rtModel(bwN,bwI){
     const pref=Math.max(Math.max(wEgN,wInN)*wtB/bwN, Math.max(wEgX,wInX)*wtB/bwI);
     per.push({
       eg:egN+egX,inn:inN+inX,egX,inX,dups,wEg:wEgN+wEgX,wIn:wInN+wInX,wEgX,wInX,gemm,
-      disp, epi:dups*H*2/HBM, pro:2*dups*H*2/HBM, pref, grd:2*pref,
+      disp, epi:dups*H*2/HBM, pro:2*dups*H*2/HBM, pref, grd:isInfer()?0:2*pref,
     });
   }
   const segC=p=>p.epi+p.pref+p.gemm+p.pro;       // fwd: epilogue, prefetch, GEMM, prologue
@@ -889,19 +907,18 @@ function rtModel(bwN,bwI){
   const maxC=Math.max(...per.map(segC));
   const maxB2=Math.max(...per.map(segB));
   const fwd=tPlan+maxDisp+maxC+maxDisp;          // combine's per-rank time mirrors dispatch
-  const bwd=maxDisp+maxB2+maxDisp;
+  const bwd=isInfer()?0:maxDisp+maxB2+maxDisp;   // inference: no backward pass at all
   return {per,segC,segB,maxDisp,maxC,maxB2,fwd,bwd,total:fwd+bwd,tPlan,wtB};
 }
 function renderRankTime(){
   const st=flowState; if(!st)return;
   const svg=$('#rankTime'); if(!svg)return;
   const {R}=st, {nvl,ib}=FLOW;
-  const M=rtModel(nvl*1e9,ib/8*1e9), MI=rtModel(ib/8*1e9,ib/8*1e9);
+  const M=rtModel(nvl*1e9,ib*1e9);
   const {per,segC,segB,maxDisp,maxC,maxB2,tPlan}=M;
   $('#rtFwd').textContent=fmtT(M.fwd);
-  $('#rtBwd').textContent=fmtT(M.bwd);
+  $('#rtBwd').textContent=isInfer()?'—':fmtT(M.bwd);
   $('#rtTot').textContent=fmtT(M.total);
-  $('#rtIB').textContent=fmtT(MI.total);
   const rows=per.map((p,r)=>{
     const segs=[];
     const add=(n,t,c,x)=>{if(t>1e-9)segs.push({n,t,c,x:x||''});};
@@ -915,16 +932,18 @@ function renderRankTime(){
     add('barrier wait',maxC-segC(p),'wait','combine entry barrier');
     add('combine',p.disp,'--s1','same rows pulled back, opposite direction');
     add('barrier wait',maxDisp-p.disp,'wait','forward ends when the slowest combine finishes');
-    add('re-dispatch grads',p.disp,'--s1','plan reused \u2014 no sync, no planning kernel');
-    add('barrier wait',maxDisp-p.disp,'wait','grad shards published');
-    add('epilogue',p.epi,'--s3','grad replicated to dup slots');
-    add('GEMM dX + dW',2*p.gemm,'--s5','backward is two GEMMs');
-    add('prologue',p.pro,'--s3','dup grads folded in');
-    add('barrier wait',maxB2-segB(p),'wait','combine entry (backward)');
-    add('combine grads',p.disp,'--s1','+ route-weight gather');
-    add('barrier wait',maxDisp-p.disp,'wait','backward ends');
-    add('reduce_grad',p.grd,'grd',`${Math.max(p.wEg,p.wIn)} slot${Math.max(p.wEg,p.wIn)===1?'':'s'} \u00d7 2\u00d7${fmtB(M.wtB)} fp32 \u2014 off the critical path, overlaps the next layer`);
-    const busy=tPlan+2*p.disp+segC(p)+p.disp+segB(p)+p.disp;
+    if(!isInfer()){
+      add('re-dispatch grads',p.disp,'--s1','plan reused \u2014 no sync, no planning kernel');
+      add('barrier wait',maxDisp-p.disp,'wait','grad shards published');
+      add('epilogue',p.epi,'--s3','grad replicated to dup slots');
+      add('GEMM dX + dW',2*p.gemm,'--s5','backward is two GEMMs');
+      add('prologue',p.pro,'--s3','dup grads folded in');
+      add('barrier wait',maxB2-segB(p),'wait','combine entry (backward)');
+      add('combine grads',p.disp,'--s1','+ route-weight gather');
+      add('barrier wait',maxDisp-p.disp,'wait','backward ends');
+      add('reduce_grad',p.grd,'grd',`${Math.max(p.wEg,p.wIn)} slot${Math.max(p.wEg,p.wIn)===1?'':'s'} \u00d7 2\u00d7${fmtB(M.wtB)} fp32 \u2014 off the critical path, overlaps the next layer`);
+    }
+    const busy=tPlan+2*p.disp+segC(p)+(isInfer()?0:p.disp+segB(p)+p.disp);
     return {segs,busy,wait:M.total-busy};
   });
   $('#rtWait').textContent=(100*rows.reduce((a,x)=>a+x.wait,0)/rows.length/M.total).toFixed(1)+'%';
@@ -932,8 +951,8 @@ function renderRankTime(){
   const critC=per.reduce((b,p,r)=>segC(p)>segC(per[b])?r:b,0);
   $('#rtNote').innerHTML=`Critical ranks: ${rankSw(critD)}r${critD} sets the dispatch/combine phases `+
     `(heaviest token traffic); ${rankSw(critC)}r${critC} sets the forward compute phase (prefetch + GEMM). `+
-    `Every bar ends at the same instant \u2014 that is the balance guarantee. The gray is what the lighter ranks pay for it. `+
-    `reduce_grad (faded) extends past the end because it overlaps the next layer\u2019s compute.`;
+    `Every bar ends at the same instant \u2014 that is the balance guarantee. The gray is what the lighter ranks pay for it.`+
+    (isInfer()?' Inference: no backward pass, no reduce_grad.':' reduce_grad (faded) extends past the end because it overlaps the next layer\u2019s compute.');
   const W=svg.clientWidth||900, rowH=20, gap=6, padL=40, padT=18, padR=64;
   const maxGrd=Math.max(...per.map(p=>p.grd));
   const span=M.total+maxGrd;
@@ -950,7 +969,7 @@ function renderRankTime(){
     const tx=mk('text',{x:X(t)+2,y:padT-7,class:'axis-label'});tx.textContent=fmtT(t);
   }
   mk('line',{x1:X(M.fwd),x2:X(M.fwd),y1:padT-4,y2:Hh-16,stroke:'var(--ink-2)','stroke-width':1,'stroke-dasharray':'4 3',opacity:.7});
-  mk('line',{x1:X(M.total),x2:X(M.total),y1:padT-4,y2:Hh-16,stroke:'var(--ink-2)','stroke-width':1.4,opacity:.8});
+  if(!isInfer())mk('line',{x1:X(M.total),x2:X(M.total),y1:padT-4,y2:Hh-16,stroke:'var(--ink-2)','stroke-width':1.4,opacity:.8});
   rows.forEach((row,r)=>{
     const y=padT+r*(rowH+gap);
     const lb=mk('text',{x:padL-6,y:y+rowH/2+4,'text-anchor':'end','font-size':11,'font-weight':700,fill:'var(--ink)'});lb.textContent='r'+r;
@@ -959,7 +978,7 @@ function renderRankTime(){
       const x=X(t0), w=Math.max(X(t0+sg.t)-X(t0),0.8);
       const fill=sg.c==='wait'?'var(--grid)':sg.c==='grd'?'var(--s2)':`var(${sg.c})`;
       const rc=mk('rect',{x,y,width:w,height:rowH,fill,opacity:sg.c==='grd'?.38:.95});
-      rc.addEventListener('mousemove',ev=>showTT(ev,`<div class="tt-t">r${r} \u00b7 ${sg.n}</div><div class="tt-v">${fmtT(sg.t)} (${(100*sg.t/M.total).toFixed(1)}% of layer)</div>${sg.x?`<div>${sg.x}</div>`:''}`));
+      rc.addEventListener('mousemove',ev=>showTT(ev,`<div class="tt-t">r${r} \u00b7 ${sg.n}</div><div class="tt-v">${fmtT(sg.t)} (${(100*sg.t/M.total).toFixed(1)}% of total)</div>${sg.x?`<div>${sg.x}</div>`:''}`));
       rc.addEventListener('mouseleave',hideTT);
       t0+=sg.t;
     });
@@ -967,13 +986,38 @@ function renderRankTime(){
     wl.textContent='waits '+(100*row.wait/M.total).toFixed(0)+'%';
   });
   const fl=mk('text',{x:X(M.fwd)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'});fl.textContent='fwd ends';
-  const tl=mk('text',{x:X(M.total)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'});tl.textContent='bwd ends';
+  if(!isInfer()){const tl=mk('text',{x:X(M.total)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'});tl.textContent='bwd ends';}
 }
 bindParams('#flowParams',FLOW,renderFlow);
 $('#flowskew').addEventListener('input',renderFlow);
 $('#flowReseed').onclick=()=>{flowSeed=(flowSeed*48271)%2147483647;renderFlow();};
 $('#scSkew').onclick=()=>{flowScenario='skew';$('#scSkew').classList.add('on');$('#scHot').classList.remove('on');renderFlow();};
 $('#scHot').onclick=()=>{flowScenario='hot';$('#scHot').classList.add('on');$('#scSkew').classList.remove('on');renderFlow();};
+$('#prTrain').onclick=()=>{FLOW.prec='bf16';$('#prTrain').classList.add('on');$('#prInfer').classList.remove('on');renderFlow();};
+$('#prInfer').onclick=()=>{FLOW.prec='mxfp4';$('#prInfer').classList.add('on');$('#prTrain').classList.remove('on');renderFlow();};
+const PRESETS={ // model shape + precision only; R / node size / bandwidths / TFLOP stay as set
+  psMoon:{S:4096,K:8, E:384,H:7168,Hp:2048,prec:'bf16'},   // bench_vs_deepep.py defaults
+  psK3:  {S:4096,K:16,E:896,H:3584,Hp:3072,prec:'mxfp4'},  // Kimi K3 as shipped (QAT MXFP4)
+  psDsv3:{S:4096,K:8, E:256,H:7168,Hp:2048,prec:'bf16'},   // DeepSeek-V3
+};
+function applyPreset(p){
+  for(const[k,v]of Object.entries(p)){
+    if(k==='prec'){
+      FLOW.prec=v;
+      $('#prTrain').classList.toggle('on',v==='bf16');
+      $('#prInfer').classList.toggle('on',v==='mxfp4');
+      continue;
+    }
+    const inp=document.querySelector(`#flowParams input[data-p="${k}"]`);
+    if(!inp){FLOW[k]=v;continue;}
+    inp.value=inp.dataset.pow?Math.round(Math.log2(v)):v;
+    let vv=+inp.value; if(inp.dataset.pow)vv=2**vv;
+    FLOW[k]=vv;
+    const vs=inp.parentElement.querySelector('.v'); if(vs)vs.textContent=fmtN(vv);
+  }
+  renderFlow();
+}
+for(const id of Object.keys(PRESETS))$('#'+id).onclick=()=>applyPreset(PRESETS[id]);
 
 /* ============ boot ============ */
 function renderAll(){ renderFlow(); }

@@ -11,7 +11,7 @@
     <link>https://xmfan.github.io/posts/2026-09-03-moonep-routing-flow/</link>
     <guid>https://xmfan.github.io/posts/2026-09-03-moonep-routing-flow/</guid>
     <pubDate>Thu, 03 Sep 2026 00:00:00 +0000</pubDate>
-    <description>An interactive model of one MoonEP MoE layer. Set the shape, drag the router skew, and watch how the router loads each expert, how the planner's greedy balance repairs the imbalance, which expert weights cross which link, and how long the layer takes, rank by rank.</description>
+    <description>An interactive model of one MoonEP MoE layer. Set the shape, drag the router skew, and watch how the router loads each expert, how the planner's greedy balance repairs the imbalance, which expert weights cross which link, and how long the routed-expert path takes, rank by rank.</description>
   </item>
 </channel>
 </rss>
