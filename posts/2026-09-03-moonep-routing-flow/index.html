@@ -221,7 +221,8 @@ waits included. Everything is computed by a faithful JS port of MoonEP's plannin
 Read top to bottom, in the order the planner works. First, <b>which experts</b> the router loaded,
 and how far each rank ends up over or under capacity. Then <b>the greedy balance</b> that repairs
 the imbalance, one move at a time. Then <b>where the replica weights fly</b>, next to every token
-src→dst pair. Finally, <b>what it all costs in time</b>, rank by rank. Every chart recomputes live
+src→dst pair. Finally, <b>what it all costs in time</b>, rank by rank — and <b>the memory it all lives in</b>.
+Every chart recomputes live
 from the sliders through the planner port (Steps 1–4, the C2 destination arithmetic, per-token
 dedup) — the traffic shown is what the kernels would actually move, not a sketch.
 </p>
@@ -365,6 +366,18 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
     timeline here shows the unoverlapped critical path.
   </div>
 
+  <h3 style="margin:20px 0 4px">Memory: reserved once, breathing never</h3>
+  <p style="font-size:13.5px;margin:2px 0 6px">
+  One rank's memory over the same time axis as the timeline above. Every MoonEP band is
+  <b>reserved at t = 0</b>, before the router routes a single token — the light fill is the static
+  reservation, the solid fill is what's actually occupied as the layer runs. The only memory that
+  appears and disappears is the framework's own GEMM activations. That flatness is the point:
+  fully static shapes, no per-layer allocation, no fragmentation, no OOM at any imbalance
+  (README's comparison vs dynamic EP). Hover any band for its formula.
+  </p>
+  <svg id="memChart" width="100%" height="250" role="img" aria-label="per-rank memory reservation and occupancy over one layer"></svg>
+  <div class="legendrow" id="memLeg"></div>
+  <div class="kbd-note" id="memNote" style="margin-top:6px"></div>
 
 </div>
 </div><!-- /flowgrid -->
@@ -987,6 +1000,110 @@ function renderRankTime(){
   });
   const fl=mk('text',{x:X(M.fwd)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'});fl.textContent='fwd ends';
   if(!isInfer()){const tl=mk('text',{x:X(M.total)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'});tl.textContent='bwd ends';}
+  lastRT={M,critC};
+  renderMemChart();
+}
+/* ---- memory over time: static reservations + occupancy, aligned to the timeline ---- */
+let lastRT=null;
+function renderMemChart(){
+  const st=flowState; if(!st||!lastRT)return;
+  const svg=$('#memChart'); if(!svg)return;
+  const {M,critC}=lastRT, {per,tPlan,maxDisp,maxC,maxB2}=M;
+  const {R,epn}=st, {H,Hp}=FLOW, train=!isInfer();
+  const wPB=isInfer()?0.53125:2, expB=3*H*Hp;
+  const NvS=st.N+127*2*epn;                       // api.py: S·K + (token_padding−1)·2·epn
+  const maxWIn=Math.max(0,...Array.from({length:R},(_,r)=>st.wArrows.filter(a=>a.to===r).length));
+  // static pools, bottom-up (reserved at t=0, constant forever)
+  const pools=[
+    {n:'expert weights (own shard)',b:epn*expB*wPB,c:'--baseline',
+     t:`rows [0,E) shard: ${epn} experts × 3·H·H′ × ${wPB} B (${precTag()}) — this rank's parameters, mapped to peers via symmetric memory`},
+    {n:'prefetch slot pool',b:epn*expB*wPB,c:'--s2',
+     t:`rows [E,E+B): B = epn = ${epn} slots × 3·H·H′ × ${wPB} B — process-global, shared by ALL layers, so this is the whole model's bill (README:54). One-donor-per-receiver is the proof it suffices`},
+    {n:'hidden_buf',b:NvS*H*2,c:'--s1',
+     t:`[NvS, H] bf16 dispatch buffer: NvS = S·K + 127·2·epn = ${fmtN(NvS)} rows (segment-padding bound, api.py:281–287). A copy-free DeepEP path would need S·K·R rows here — ${R}×`},
+    {n:'meta_buf',b:(2*NvS+3*st.N+R*st.E)*4,c:'--s7',
+     t:`int32 scratch: route weights alias, tpe gather [R·E], planning staging, dedup src_info — all statically carved (api.py docstring)`},
+  ];
+  if(train){
+    pools.push({n:'param grads fp32 (own shard)',b:epn*expB*4,c:'--s8',
+      t:`grad rows [0,E): the framework's fp32 grads for this rank's experts — MoonEP requires them contiguous, mirroring the weight layout (README:65)`});
+    pools.push({n:'grad reduce pool fp32',b:epn*expB*4,c:'--s4',
+      t:`[R,B,H,H′] fp32 logical view; each rank physically backs its own [B,H,H′] slice = B × 3·H·H′ × 4 B. Foreign-slot grads land here, owners pull them in reduce_grad (grad_reduce.py:437)`});
+  }
+  const actB=NvS*(3*Hp+H)*2;                      // gate/up/act [NvS,H′]×3 + down out [NvS,H], bf16
+  const p=per[critC], grd=Math.max(...per.map(q=>q.grd));
+  const span=M.total+grd;
+  // phase boundaries (critical compute rank for the sub-windows)
+  const dsp0=tPlan, dsp1=tPlan+maxDisp;
+  const gemF0=dsp1+p.epi+p.pref, gemF1=gemF0+p.gemm;
+  const fwd=M.fwd;
+  const gemB0=fwd+maxDisp+p.epi, gemB1=gemB0+2*p.gemm;
+  const bwdC1=fwd+maxDisp+maxB2;
+  const W=svg.clientWidth||900, Hh=250, padL=40, padT=18, padB=20, padR=64;
+  svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`); svg.innerHTML='';
+  const ns='http://www.w3.org/2000/svg';
+  const mk=(t,at)=>{const e=document.createElementNS(ns,t);for(const k in at)e.setAttribute(k,at[k]);svg.appendChild(e);return e;};
+  const X=t=>padL+(W-padL-padR)*t/span;
+  const totB=pools.reduce((a,q)=>a+q.b,0);
+  const yMax=(totB+actB)*1.06;
+  const Y=b=>padT+(Hh-padT-padB)*(1-b/yMax);
+  // gridlines + GiB ticks
+  const gstep=2**Math.ceil(Math.log2(yMax/2**30/5));
+  for(let g=0;g*gstep*2**30<yMax;g++){
+    const yy=Y(g*gstep*2**30);
+    mk('line',{x1:padL,x2:W-padR,y1:yy,y2:yy,stroke:'var(--grid)','stroke-width':1});
+    const tx=mk('text',{x:padL-4,y:yy+3,'text-anchor':'end',class:'axis-label'});tx.textContent=g*gstep+' GiB';
+  }
+  // time ticks matching the timeline
+  let step=span*80/(W-padL-padR);
+  const pw=10**Math.floor(Math.log10(step)); const m0=step/pw;
+  step=(m0<=1?1:m0<=2?2:m0<=5?5:10)*pw;
+  for(let t=0;t<=span;t+=step){
+    mk('line',{x1:X(t),x2:X(t),y1:padT-4,y2:Hh-padB,stroke:'var(--grid)','stroke-width':1});
+    const tx=mk('text',{x:X(t)+2,y:padT-7,class:'axis-label'});tx.textContent=fmtT(t);
+  }
+  mk('line',{x1:X(fwd),x2:X(fwd),y1:padT-4,y2:Hh-padB,stroke:'var(--ink-2)','stroke-width':1,'stroke-dasharray':'4 3',opacity:.7});
+  if(train)mk('line',{x1:X(M.total),x2:X(M.total),y1:padT-4,y2:Hh-padB,stroke:'var(--ink-2)','stroke-width':1.4,opacity:.8});
+  const hover=(el,tt)=>{el.addEventListener('mousemove',ev=>showTT(ev,tt));el.addEventListener('mouseleave',hideTT);};
+  // occupancy windows per pool: [t0 ramp-start, t1 full, t2 release], frac of band
+  const occ={
+    'hidden_buf':{t0:dsp0,t1:dsp1,t2:train?M.total:fwd,f:st.N/NvS,
+      w:`filled by dispatch, read by the GEMM, saved as hidden_nvsh for backward dW, reused zero-copy for the grad re-dispatch — released after ${train?'backward combine':'combine'}`},
+    'prefetch slot pool':{t0:dsp1+p.epi,t1:dsp1+p.epi+p.pref,t2:train?M.total:fwd,f:maxWIn/Math.max(1,epn),
+      w:`this routing fills ${maxWIn} of ${epn} slots on the busiest receiver — the reservation is the worst case the invariant allows`},
+    'grad reduce pool fp32':train?{t0:gemB1,t1:bwdC1,t2:M.total+grd,f:maxWIn/Math.max(1,epn),
+      w:`dW for ${maxWIn} foreign slot${maxWIn===1?'':'s'} lands here after the backward GEMM; owners pull and slots are cleared by reduce_grad`}:null,
+  };
+  let cum=0;
+  pools.forEach(q=>{
+    const y1=Y(cum+q.b), y0=Y(cum), hgt=y0-y1;
+    const band=mk('rect',{x:padL,y:y1,width:W-padL-padR,height:hgt,fill:`var(${q.c})`,opacity:.28});
+    hover(band,`<div class="tt-t">${q.n} — reserved at t = 0</div><div class="tt-v">${fmtB(q.b)}</div><div>${q.t}</div>`);
+    const o=occ[q.n];
+    if(o&&o.f>0){
+      const oh=Math.max(1.5,hgt*Math.min(1,o.f));
+      const pts=`${X(o.t0)},${y0} ${X(o.t1)},${y0-oh} ${X(o.t2)},${y0-oh} ${X(o.t2)},${y0}`;
+      const poly=mk('polygon',{points:pts,fill:`var(${q.c})`,opacity:.9});
+      hover(poly,`<div class="tt-t">${q.n} — occupancy</div><div class="tt-v">${fmtB(q.b*Math.min(1,o.f))} of ${fmtB(q.b)}</div><div>${o.w}</div>`);
+    }
+    if(hgt>13){const lb=mk('text',{x:W-padR-6,y:(y0+y1)/2+3.5,'text-anchor':'end','font-size':10.5,fill:'var(--ink-2)'});lb.textContent=`${q.n} · ${fmtB(q.b)}`;}
+    cum+=q.b;
+  });
+  // transient framework GEMM activations on top of the stack
+  const yA0=Y(cum), yA1=Y(cum+actB);
+  const wins=train?[[gemF0,fwd],[gemB0,bwdC1]]:[[gemF0,fwd]];
+  wins.forEach(([a,b])=>{
+    const r=mk('rect',{x:X(a),y:yA1,width:Math.max(1,X(b)-X(a)),height:yA0-yA1,fill:'var(--s5)',opacity:.75});
+    hover(r,`<div class="tt-t">framework GEMM activations (not MoonEP's)</div><div class="tt-v">${fmtB(actB)}</div><div>gate/up/act [NvS,H′] + down out [NvS,H] bf16 — the only memory that appears and disappears; drawn recompute-style, a framework that saves them for backward keeps this band alive through to the backward GEMM</div>`);
+  });
+  const fl=mk('text',{x:X(fwd)-3,y:Hh-6,'text-anchor':'end',class:'axis-label'});fl.textContent='fwd ends';
+  if(train){const tl=mk('text',{x:X(M.total)-3,y:Hh-6,'text-anchor':'end',class:'axis-label'});tl.textContent='bwd ends';}
+  $('#memLeg').innerHTML=pools.map(q=>`<span class="li" style="--lc:var(${q.c})">${q.n}</span>`).join('')+
+    `<span class="li" style="--lc:var(--s5)">framework GEMM activations (transient)</span>`;
+  $('#memNote').innerHTML=`Total static reservation on this rank: <b>${fmtB(totB)}</b>`+
+    ` — of which the prefetch slot pool${train?' and both fp32 grad pools are':' is'} paid <b>once per process</b>, not per layer.`+
+    ` The K3 report's DeepEP contrast lives in the blue band: a copy-free dynamic path needs an S·K·R-row buffer where MoonEP's perfect balance needs S·K(+padding) — ${R}× less.`+
+    (train?'':' Inference: no grad pools, and B can shrink to 3–4 slots (README:59), collapsing the orange band.');
 }
 bindParams('#flowParams',FLOW,renderFlow);
 $('#flowskew').addEventListener('input',renderFlow);
