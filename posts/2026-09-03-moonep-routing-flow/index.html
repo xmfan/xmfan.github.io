@@ -203,8 +203,8 @@
 <button class="btn toggle-theme" id="themeBtn" title="Toggle light/dark">◐ theme</button>
 <div class="tooltip" id="tt"></div>
 <main style="max-width:1360px;margin:0 auto">
-
 <nav class="post-nav"><a href="/">← Simon Fan</a></nav>
+
 <h1>MoonEP routing flow — live</h1>
 <p class="post-meta"><time datetime="2026-09-03">September 3, 2026</time> · source: <a href="https://github.com/MoonshotAI/MoonEP">MoonshotAI/MoonEP</a></p>
 <p class="lead">
@@ -231,7 +231,7 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
   <div style="font-size:12px;color:var(--ink-2);margin:2px 0 4px">presets
   <span style="color:var(--muted);font-size:11px">model shape + precision; topology stays as set</span></div>
   <div class="btnrow" style="margin-bottom:8px">
-    <button class="btn" id="psMoon" title="bench_vs_deepep.py defaults: 384 experts, top-8, H 7168 → H′ 2048, train bf16/fp32">MoonEP</button>
+    <button class="btn" id="psMoon" title="bench_vs_deepep.py defaults: 384 experts, top-8, H 7168 → H′ 2048, train bf16/fp32">MoonEP Repo</button>
     <button class="btn" id="psK3" title="Kimi K3: 896 experts, top-16, expert hidden 3584 → H′ 3072, train bf16/fp32 (flip precision for its MXFP4 serving mode)">Kimi K3</button>
     <button class="btn" id="psDsv3" title="DeepSeek-V3: 256 experts, top-8, H 7168 → H′ 2048, train bf16/fp32">DSv3</button>
   </div>
@@ -741,7 +741,7 @@ function renderBalanceLog(){
     `<button class="btn" id="balNext"${k>=n?' disabled':''}>next \u25b6</button>`+
     `<button class="btn" id="balAll"${k>=n?' disabled':''}>play all</button>`+
     `<span style="color:var(--muted)">step ${k} / ${n}</span></div>`;
-  html+=`<div><b>${k===0?'after routing':`after move ${k}`}</b> (cap = S\u00b7K = ${fmtN(CAP)} per rank) \u2014 balance, sorted the way the warp scan sees it:</div>`;
+  html+=`<div><b>${k===0?'after routing':`after move ${k}`}</b> (cap = S\u00b7K = ${fmtN(CAP)} per rank) \u2014 balance, sorted by value for readability (the kernel doesn't sort \u2014 it rescans registers):</div>`;
   const order=Array.from({length:R},(_,r)=>r).sort((a,b)=>bal[b]-bal[a]||a-b);
   let donor=0,recv=0;
   for(let r=1;r<R;r++){ if(bal[r]>bal[donor])donor=r; if(bal[r]<bal[recv])recv=r; } // strict compare keeps the LOWER rank on ties, like the kernel
@@ -753,7 +753,7 @@ function renderBalanceLog(){
   }).join('')+`</div></div>`; // close chip row + sticky header (buttons + state + chips scroll together)
   html+=k<n
     ?`<div style="color:var(--muted);font-size:12px;margin-bottom:2px">next pick: <b style="color:var(--s3)">donor = argmax</b> (${rk(donor)}) and <b style="color:var(--crit)">receiver = argmin</b> (${rk(recv)}). No heap \u2014 a full warp-register rescan each iteration (<code>planning.py:258\u2013283</code>), ties \u2192 lower rank; zeroed ranks (faded) are out of the game for good.</div>`
-    :`<div style="color:var(--muted);font-size:12px;margin-bottom:2px">the scan finds no positive surplus left \u2014 the loop exits.</div>`;
+    :`<div style="color:var(--muted);font-size:12px;margin-bottom:2px">the scan finds no positive surplus \u2014 and, balances summing to zero, no deficit either (planning.py:689 checks both) \u2014 the loop exits.</div>`;
   moves.slice(0,k).forEach((m,i)=>{
     const cur=i===k-1&&balStep!=null;
     html+=`<div style="margin-top:9px${cur?';background:var(--code-hl);border-radius:6px;padding:3px 8px':''}"><b>move ${i+1}</b>: ${rk(m.from)} (+${fmtN(m.donorBefore)}) lends <b>${fmtN(m.n)}</b> entries to ${rk(m.to)} (\u2212${fmtN(m.n)} \u2192 <b>0</b>)`;
@@ -951,7 +951,7 @@ function renderRankTime(){
   const critC=per.reduce((b,p,r)=>segC(p)>segC(per[b])?r:b,0);
   $('#rtNote').innerHTML=`Critical ranks: ${rankSw(critD)}r${critD} sets the dispatch/combine phases `+
     `(heaviest token traffic); ${rankSw(critC)}r${critC} sets the forward compute phase (prefetch + GEMM). `+
-    `Every bar ends at the same instant \u2014 that is the balance guarantee. The gray is what the lighter ranks pay for it.`+
+    `Every bar ends at the same instant because of the barriers; what the balance actually guarantees is the GEMM segment \u2014 identical on every rank. The gray is what the lighter ranks pay for it.`+
     (isInfer()?' Inference: no backward pass, no reduce_grad.':' reduce_grad (faded) extends past the end because it overlaps the next layer\u2019s compute.');
   const W=svg.clientWidth||900, rowH=20, gap=6, padL=40, padT=18, padR=64;
   const maxGrd=Math.max(...per.map(p=>p.grd));
