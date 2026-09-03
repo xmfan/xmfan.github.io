@@ -232,7 +232,7 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
   <span style="color:var(--muted);font-size:11px">model shape + precision; topology stays as set</span></div>
   <div class="btnrow" style="margin-bottom:8px">
     <button class="btn" id="psMoon" title="bench_vs_deepep.py defaults: 384 experts, top-8, H 7168 → H′ 2048, train bf16/fp32">MoonEP</button>
-    <button class="btn" id="psK3" title="Kimi K3 as shipped: 896 experts, top-16, expert hidden 3584 → H′ 3072, infer MXFP4">Kimi K3</button>
+    <button class="btn" id="psK3" title="Kimi K3: 896 experts, top-16, expert hidden 3584 → H′ 3072, train bf16/fp32 (flip precision for its MXFP4 serving mode)">Kimi K3</button>
     <button class="btn" id="psDsv3" title="DeepSeek-V3: 256 experts, top-8, H 7168 → H′ 2048, train bf16/fp32">DSv3</button>
   </div>
   <div class="paramrow" id="flowParams">
@@ -291,7 +291,7 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
   later move. That is the deliberate price of one-donor-per-receiver. Each move is realized by
   slicing off the donor's biggest experts, and every slice of a foreign expert ships one weight copy.
   </p>
-  <div id="balLog" class="scrollwin" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.9;background:var(--code-bg);border:1px solid var(--grid);border-radius:10px;padding:12px 16px;overflow-x:auto;max-height:420px"></div>
+  <div id="balLog" class="scrollwin" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.9;background:var(--code-bg);border:1px solid var(--grid);border-radius:10px;padding:12px 16px;overflow-x:auto;max-height:760px"></div>
 
 
 
@@ -997,7 +997,7 @@ $('#prTrain').onclick=()=>{FLOW.prec='bf16';$('#prTrain').classList.add('on');$(
 $('#prInfer').onclick=()=>{FLOW.prec='mxfp4';$('#prInfer').classList.add('on');$('#prTrain').classList.remove('on');renderFlow();};
 const PRESETS={ // model shape + precision only; R / node size / bandwidths / TFLOP stay as set
   psMoon:{S:4096,K:8, E:384,H:7168,Hp:2048,prec:'bf16'},   // bench_vs_deepep.py defaults
-  psK3:  {S:4096,K:16,E:896,H:3584,Hp:3072,prec:'mxfp4'},  // Kimi K3 as shipped (QAT MXFP4)
+  psK3:  {S:4096,K:16,E:896,H:3584,Hp:3072,prec:'bf16'},  // Kimi K3 shape; flip to infer MXFP4 for its serving mode
   psDsv3:{S:4096,K:8, E:256,H:7168,Hp:2048,prec:'bf16'},   // DeepSeek-V3
 };
 function applyPreset(p){
