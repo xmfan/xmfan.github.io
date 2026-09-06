@@ -96,6 +96,8 @@
     border:1px solid var(--baseline); border-radius:8px; padding:6px 14px; cursor:pointer;
   }
   .btn:hover { border-color:var(--s1); color:var(--s1); }
+  .btn:disabled { opacity:.45; cursor:default; }
+  .btn:disabled:hover { border-color:var(--baseline); color:var(--ink); }
   .btn.primary { background:var(--s1); border-color:var(--s1); color:#fff; }
   .btn.on { background:var(--s1); border-color:var(--s1); color:#fff; }
   .toggle-theme { position:fixed; right:18px; top:14px; z-index:50; }
@@ -205,14 +207,16 @@
 <main style="max-width:1360px;margin:0 auto">
 <nav class="post-nav"><a href="/">← Simon Fan</a></nav>
 
+<div class="card callout cost" style="margin:0 0 20px"><strong>🚧 Under construction while I juggle token allowances.</strong></div>
 <h1>MoonEP routing flow — live</h1>
 <p class="post-meta"><time datetime="2026-09-03">September 3, 2026</time> · source: <a href="https://github.com/MoonshotAI/MoonEP">MoonshotAI/MoonEP</a></p>
 <p class="lead">
 An interactive model of one MoonEP MoE layer. Set the shape, drag the router skew, and watch:
 how the router loads each expert, how the planner's greedy balance repairs the imbalance,
-which expert weights cross which link, and how long the routed-expert path takes — rank by rank, barrier
-waits included. Everything is computed by a faithful JS port of MoonEP's planning kernel
-(revision <code>2bd860b</code>, 2026-08-13).
+which expert weights cross which link, and what an analytic cost model estimates for each rank.
+Allocation and deduplicated hidden-payload counts follow a JS port of MoonEP's planning kernel
+(<a href="https://github.com/MoonshotAI/MoonEP/tree/2bd860b4dd083df62b79d5e916fca71ec5742228"><code>2bd860b</code></a>, 2026-08-13).
+Timing and memory lifetimes are modeled assumptions, not GPU measurements.
 </p>
 
 <!-- ============================================================ 4d -->
@@ -222,9 +226,9 @@ Read top to bottom, in the order the planner works. First, <b>which experts</b> 
 and how far each rank ends up over or under capacity. Then <b>the greedy balance</b> that repairs
 the imbalance, one move at a time. Then <b>where the replica weights fly</b>, next to every token
 src→dst pair. Finally, <b>what it all costs in time</b>, rank by rank — and <b>the memory it all lives in</b>.
-Every chart recomputes live
-from the sliders through the planner port (Steps 1–4, the C2 destination arithmetic, per-token
-dedup) — the traffic shown is what the kernels would actually move, not a sketch.
+The charts recompute from the same synthetic routing: Steps 1–4, C2 destination arithmetic,
+and per-token dedup determine the counts. Byte formulas and an explicitly synchronized schedule
+turn those counts into estimates; planning/control traffic and transport overhead are not fully modeled.
 </p>
 <div id="flowgrid">
 <aside id="dock">
@@ -243,23 +247,25 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
     <label><span class="pn"><b>H</b> expert hidden size</span><input type="range" min="2048" max="8192" step="256" value="7168" data-p="H"><span class="v" data-v="H"></span></label>
     <label><span class="pn"><b>H&prime;</b> FFN intermediate</span><input type="range" min="512" max="4096" step="256" value="2048" data-p="Hp"><span class="v" data-v="Hp"></span></label>
     <label><span class="pn"><b>R</b> EP ranks</span><input type="range" min="1" max="6" step="1" value="3" data-p="R" data-pow="1"><span class="v" data-v="R"></span></label>
-    <label><span class="pn">node size <span class="pu">GPUs per NVLink node</span></span><input type="range" min="1" max="4" step="1" value="3" data-p="ns" data-pow="1"><span class="v" data-v="ns"></span></label>
+    <label><span class="pn">island size <span class="pu">ranks in one NVLink domain</span></span><input type="range" min="1" max="4" step="1" value="3" data-p="ns" data-pow="1"><span class="v" data-v="ns"></span></label>
     <label><span class="pn">NVLink bandwidth <span class="pu">GB/s</span></span><input type="range" min="100" max="900" step="50" value="450" data-p="nvl"><span class="v" data-v="nvl"></span></label>
-    <label><span class="pn">InfiniBand bandwidth <span class="pu">GB/s per GPU · NDR = 50</span></span><input type="range" min="10" max="100" step="5" value="50" data-p="ib"><span class="v" data-v="ib"></span></label>
+    <label><span class="pn">hypothetical IB <span class="pu">GB/s per GPU · NDR = 50</span></span><input type="range" min="10" max="100" step="5" value="50" data-p="ib"><span class="v" data-v="ib"></span></label>
     <label><span class="pn">GEMM throughput <span class="pu">effective TFLOP/s</span></span><input type="range" min="100" max="3000" step="50" value="400" data-p="tf"><span class="v" data-v="tf"></span></label>
-    <span class="pn">precision</span>
+    <span class="pn">weight precision / execution</span>
     <div class="btnrow">
       <button class="btn on" id="prTrain" title="bf16 weights, fp32 grad reduce, fwd + bwd">train bf16/fp32</button>
       <button class="btn" id="prInfer" title="packed 4-bit weights + scales, forward only">infer MXFP4</button>
     </div>
   </div>
+  <div class="kbd-note" style="font-size:11.5px">E snaps to a multiple of R. Training fixes B = E/R; inference slots can be adjusted below. Token padding = 128.
+  Island size &lt; R models hypothetical IB edges; MoonEP itself requires a shared NVLink fabric.</div>
   <div class="paramrow">
     <label><span class="pn"><b>&alpha;</b> router skew</span><input type="range" id="flowskew" min="0" max="30" step="1" value="12"><span class="v" id="flowskewv"></span></label>
     <div class="btnrow">
       <button class="btn on" id="scSkew">random routing (α)</button>
       <button class="btn" id="flowReseed" title="reseed">↻</button>
     </div>
-    <button class="btn" id="scHot">pathological: all → r0's experts</button>
+    <button class="btn" id="scHot">hot: every token → first K experts</button>
     <span class="pill" id="flowvio"></span>
   </div>
 </aside>
@@ -278,9 +284,8 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
   <div class="kbd-note" id="maxvioCalc"></div>
   <p style="font-size:13.5px;margin:14px 0 2px">
   <b>Same data, summed per rank.</b> Add each rank's experts together and subtract its capacity
-  (S·K entries — what its GPU will compute after balancing). Bars <b>above zero</b> have too many
-  entries; bars <b>below zero</b> have room to spare. The greedy balance below moves exactly these
-  surpluses into exactly these deficits.
+  (S·K real entries after balancing, before padding). Bars <b>above zero</b> have too many
+  entries; bars <b>below zero</b> have room to spare. These are net export/import requirements; a donor may export more than its initial surplus and later import entries.
   </p>
   <svg id="rankBal" width="100%" height="120" role="img" aria-label="per-rank entry surplus or deficit versus capacity"></svg>
   <h3 style="margin:20px 0 4px">The greedy balance, step by step</h3>
@@ -290,21 +295,39 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
   refills the currently hungriest rank <b>in one shot</b>, from the currently biggest donor.
   The donor can <b>overshoot into deficit</b>; it then becomes a receiver and gets refilled by a
   later move. That is the deliberate price of one-donor-per-receiver. Each move is realized by
-  slicing off the donor's biggest experts, and every slice of a foreign expert ships one weight copy.
+  slicing off the donor's biggest experts. With the full prefetch budget, every foreign expert
+  segment gets one weight copy; smaller inference pools leave some segments to read weights remotely.
   </p>
   <div id="balLog" class="scrollwin" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.9;background:var(--code-bg);border:1px solid var(--grid);border-radius:10px;padding:12px 16px;overflow-x:auto;max-height:760px"></div>
 
-
-
-
-
-
-
+  <details class="kbd-note" style="margin-top:12px">
+    <summary><b>Why one donor per receiver is enough</b></summary>
+    <p>Let C = S·K and b<sub>h</sub> = the load of home group h − C. Balances sum to zero.
+    Each step transfers the entire largest deficit from the largest positive donor; ties select
+    the smallest rank index. The receiver becomes zero and cannot be selected again while
+    positive and negative balances remain. At most R−1 moves finish the plan.</p>
+    <p>A deficit is at most C. A positive donor has not previously received and retains C+b<sub>h</sub>
+    of its own entries, so it can supply the transfer even if its balance becomes negative.
+    That donor can then receive once from a different home group. For example, balances
+    [+3,+2,−5] become [−2,+2,0], then [0,0,0].</p>
+    <p>Each receiver therefore gets foreign experts from only one home group, containing E/R experts.
+    B = E/R prefetch slots suffice. At most 2·E/R nonempty local-plus-foreign segments need padding,
+    bounding logical capacity by NvS = S·K + 2·(E/R)·(p−1). This guarantees feasibility;
+    it does not minimize bytes or account for topology.
+    <a href="https://github.com/MoonshotAI/MoonEP/blob/2bd860b/moonep/api.py#L279">Capacity derivation in the API</a>.</p>
+  </details>
+  <h3 style="margin:20px 0 4px">Three counts to keep separate</h3>
+  <p style="font-size:13.5px">One token routed to two experts on one destination and a third expert
+  on another creates <b>three entries</b>, <b>two hidden-payload rows</b>, and <b>three fp32 route weights</b>.
+  A destination expands its shared hidden row into expert slots; combine folds those slots back together.
+  Every nonempty expert segment is rounded up to 128 rows for GEMM. Local payload rows appear on the
+  matrix diagonal but do not cross a link.</p>
+  <div class="scrollwin" style="max-height:280px"><table class="t" id="countTable" aria-label="routed entries, unique token rows and padded GEMM rows by destination"></table></div>
 
   <h3 style="margin:20px 0 4px">Where the weights fly</h3>
-  <p style="font-size:13.5px;margin:2px 0 6px">Each orange arrow is one duplicated expert's weights,
+  <p style="font-size:13.5px;margin:2px 0 6px">Each orange arrow is one prefetched expert's weights,
   flying from its owner to the rank that will compute it. Width scales with the rows the copy serves;
-  dashed means it crosses a node boundary. Token traffic lives in the matrix beside it — every
+  dashed means a hypothetical IB edge between NVLink islands. Token traffic lives in the matrix beside it — every
   src→dst pair.</p>
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
     <svg id="flowSvg" style="flex:1 1 480px;min-width:0" height="480" role="img" aria-label="expert weight arrows between ranks"></svg>
@@ -320,70 +343,192 @@ dedup) — the traffic shown is what the kernels would actually move, not a sket
     </div>
   </div>
   <div class="legendrow">
-    <span class="li" style="--lc:var(--s2)">expert weight copy, owner → receiver · width ∝ rows served · dashed = cross-node (IB)</span>
+    <span class="li" style="--lc:var(--s2)">expert weight copy, owner → receiver · wider = more rows served · dashed = hypothetical IB</span>
   </div>
   <div class="kbd-note" id="flowNote" style="margin:8px 0"></div>
-  <h3 style="margin:20px 0 4px">How long do one layer's routed experts take: dispatch → grouped GEMM → combine?</h3>
+  <h3 id="inference-slots" style="margin:20px 0 4px">Fewer prefetch slots in inference</h3>
+  <p style="font-size:13.5px">The planner first balances the entries, then selects the <b>B largest foreign
+  expert segments</b> on each destination for prefetch; equal counts favor the larger expert ID.
+  With B = E/R every foreign segment fits. In inference, a smaller pool is valid: unselected segments
+  keep their original expert IDs in <code>cu_seqlens</code> and GEMM reads those weights remotely
+  through the owner's symmetric mapping. Changing B changes weight placement, not the routing or padding.</p>
+  <p style="font-size:13.5px">The <a href="https://github.com/MoonshotAI/MoonEP/blob/2bd860b/README.md#how-to-set-b">repository suggests 3–4 slots for inference</a>.
+  That saves reserved memory even if a particular routing needs few copies. It does not eliminate
+  the overflow weight traffic. The same README requires B = E/R for training, so these controls
+  unlock only in <b>infer MXFP4</b> mode.</p>
+  <div class="paramrow" style="display:flex;flex-wrap:wrap;gap:16px">
+    <label>Prefetch slots per rank <b>B</b> <input id="slotBudget" type="range" min="1" max="48" step="1" value="4" disabled><span class="v" id="slotBudgetValue"></span></label>
+    <label>Full weight passes per overflow expert <input id="remotePasses" type="range" min="1" max="16" step="1" value="1" disabled><span class="v" id="remotePassesValue"></span></label>
+  </div>
+  <div class="btnrow"><button class="btn" id="slotsFour" disabled>Try 4 slots</button><button class="btn" id="slotsFull" disabled>Use full E/R budget</button></div>
+  <div class="kbd-note" id="slotNote" style="margin:8px 0"></div>
+  <div class="scrollwin" style="max-height:260px;overflow-x:auto"><table class="t" id="slotTable" aria-label="prefetched and overflow expert segments by destination"></table></div>
+  <p class="kbd-note">The weight-pass setting is a sensitivity assumption. One pass charges the complete
+  gate/up/down payload, including scales, once per overflow expert on each destination; more passes
+  model rereads. Real traffic depends on GEMM tiling and caches, and is not determined by the planner.
+  The timeline adds the estimated remote-read service cost to forward GEMM compute, without hiding it
+  under compute. It is an additive approximation, not a calibrated latency bound. Orange ring arrows
+  show explicit prefetches only; the table lists overflow reads that take place inside GEMM.</p>
+
+  <h3 style="margin:20px 0 4px">A training contract before the timeline</h3>
+  <p style="font-size:13.5px">This model saves an <b>independent dispatched input</b> and BF16 intermediate
+  activations for backward. Dispatch and combine use boundary copies; their cost is included.
+  Communication-buffer views are overwritten by later calls and cannot be saved for autograd.
+  Hidden <code>zero_copy</code> and <code>router_weights_zero_copy</code> are independent options,
+  both false by default. Forward route weights are copied and retained for the expert backward path.</p>
+  <p style="font-size:13.5px">Save the <code>MoonEPCommPlan</code> and forward <code>cu_seqlens</code>.
+  Backward-of-combine dispatches output gradients using that plan; plan reuse skips planning but retains
+  the API's default pre-sync, and returns no new cu_seqlens. We re-prefetch weights before backward
+  because other layers can overwrite shared slots. Expert backward computes dX, dW and route-weight
+  gradients; backward-of-dispatch combines hidden gradients and gathers route-weight gradients.
+  <code>reduce_grad</code> then pulls temporary fp32 expert gradients into their owners, fences peers,
+  and clears consumed slots. Owners and pool users must respect completion events.
+  <a href="https://github.com/MoonshotAI/MoonEP/blob/2bd860b/moonep/api.py#L720">API contract</a>.</p>
+  <h3 style="margin:20px 0 4px">Estimated routed-expert cost under a synchronized schedule</h3>
   <p style="font-size:13.5px;margin:2px 0 6px">
-  Just the routed-expert path of one layer — planning, dispatch, prefetch, grouped GEMM, combine
-  (attention, the router, and the shared experts are not in these bars) — forward + backward,
-  rank by rank, <b>assuming no stragglers</b>. Every rank enters each
-  phase together, so all idle time is structural: a rank with lighter comm finishes early and
-  stalls at the next cross-rank barrier until the busiest rank arrives. Same bandwidth and TFLOP
-  sliders as everything else; hover any segment.
+  Every modeled phase starts together and finishes at the slowest rank. Gray means <b>idle time imposed
+  by this schedule</b>. Dispatch has an exit barrier and combine an entry barrier; a simultaneous
+  combine finish is a modeling boundary, not an extra kernel barrier. These bars include forward,
+  backward weight prefetch, boundary copies, and gradient reduction, with no assumed overlap.
+  Attention, router computation, shared experts, nonlinearities and their gradients, base dispatch/combine
+  local-memory work, allocator/launch overhead, and synchronization latency are outside the estimate.
   </p>
   <div style="display:flex;gap:26px;flex-wrap:wrap;margin:10px 0 4px">
-    <div class="stat"><div class="v" id="rtFwd"></div><div class="l">forward, critical path</div></div>
-    <div class="stat"><div class="v" id="rtBwd"></div><div class="l">backward (excl. reduce_grad)</div></div>
+    <div class="stat"><div class="v" id="rtFwd"></div><div class="l">forward estimate</div></div>
+    <div class="stat"><div class="v" id="rtBwd"></div><div class="l">backward incl. reduce_grad</div></div>
     <div class="stat"><div class="v" id="rtTot"></div><div class="l">routed-expert total (fwd + bwd)</div></div>
-    <div class="stat"><div class="v" id="rtWait"></div><div class="l">avg barrier wait per rank</div></div>
+    <div class="stat"><div class="v" id="rtWait"></div><div class="l">avg scheduled idle per rank</div></div>
   </div>
   <svg id="rankTime" width="100%" height="240" role="img" aria-label="per-rank layer timeline"></svg>
   <div class="legendrow">
     <span class="li" style="--lc:var(--s7)">planning + sync</span>
     <span class="li" style="--lc:var(--s1)">token comm (dispatch / combine)</span>
-    <span class="li" style="--lc:var(--s2)">weight comm (prefetch; faded tail = reduce_grad, overlaps next layer)</span>
-    <span class="li" style="--lc:var(--s3)">local dedup kernels</span>
-    <span class="li" style="--lc:var(--s5)">grouped GEMM</span>
-    <span class="li" style="--lc:var(--grid)">waiting at a barrier</span>
+    <span class="li" style="--lc:var(--s2)">weight prefetch / gradient reduction</span>
+    <span class="li" style="--lc:var(--s3)">local dedup / boundary copies</span>
+    <span class="li" style="--lc:var(--s5)">grouped GEMM + inference overflow reads</span>
+    <span class="li" style="--lc:var(--grid)">idle under this schedule</span>
   </div>
   <div class="kbd-note" id="rtNote" style="margin-top:6px"></div>
-  <div class="kbd-note" style="margin-top:8px">
-    A bandwidth-only model. Each comm segment is that rank's max(egress, ingress) ÷ link bandwidth;
-    GEMM is FLOPs ÷ effective TFLOP/s. The throughput slider is <b>effective</b>, so dtype and
-    utilization fold into one number: H100 peaks ≈989 TFLOP/s dense BF16 and ≈1979 FP8; B200
-    roughly 2.2×/4.5× that; a grouped GEMM over ragged expert segments typically lands at 40–60%
-    of peak. The default 400 ≈ H100 BF16 at ~40%. Token rows are always bf16 (H×2 B — MoonEP has
-    no fp8 dispatch). Weight-copy bytes follow the <b>precision toggle</b>: train = 3·H·H′×2 B
-    bf16 plus a 2× fp32 reduce_grad return; infer = K3's MXFP4, packed 4-bit + one scale per 32
-    elements ≈ 3·H·H′×0.53 B, with no backward pass at all. Barrier hardware latency (~µs each)
-    is not modeled, so the gray is purely structural waiting. With <b>node size &lt; R</b>, ranks form NVLink islands and
-    every cross-node edge is priced at the IB bandwidth; intra- and inter-node transfers ride
-    separate links, in parallel. Note that the multi-node topology is itself a what-if: MoonEP
-    <b>requires an NVLink/NVSwitch domain</b> (VMM symmetric memory + <code>multimem</code>). Finally, the comm blocks need not be dead time: the K3
-    technical report overlaps this EP communication with the <b>two shared experts</b> each layer.
-    Their GEMMs don't depend on routing, so they slot into exactly these comm windows — the
-    timeline here shows the unoverlapped critical path.
-  </div>
+  <details class="kbd-note" style="margin-top:8px" open>
+    <summary><b>How to read these estimates</b></summary>
+    <p>Hidden payload is always BF16. Forward dispatch sends one fp32 route weight per entry;
+    backward combine gathers one fp32 route-weight gradient per entry. Token phases use
+    max(egress bytes, ingress bytes) ÷ effective link bandwidth, assuming full duplex.
+    Duplicate expansion reads one primary row per group and writes each duplicate; folding reads
+    primary plus duplicate rows and writes the primary. Boundary copies count both reads and writes.</p>
+    <p>GEMM uses 6·P<sub>d</sub>·H·H′ FLOPs, where P<sub>d</sub> is that rank's padded row count.
+    Backward matmuls use twice those FLOPs. The effective throughput is held fixed across ranks and
+    precision modes; segment shapes can change real utilization. Planning is assumed to cost 20 µs;
+    local HBM bandwidth is assumed to be 3.3 TB/s. Neither is calibrated here.</p>
+    <p>For scale: <a href="https://www.nvidia.com/en-us/data-center/h100/">H100 SXM</a> dense peaks are
+    about 989 TFLOP/s BF16 and 1,979 FP8. <a href="https://www.nvidia.com/en-au/data-center/dgx-b200/">B200</a>
+    dense FP8 is about 4,500 TFLOP/s per GPU, approximately 2.27× H100 FP8. The default 400 is an assumption,
+    not a promise of a particular percentage utilization. MXFP4 changes weight bytes to
+    3·H·H′·(½+1/32), including scales, and selects forward-only execution; it does not model a quantized GEMM.</p>
+    <p>Island size &lt; R prices cross-island edges as hypothetical IB, independently of intra-island NVLink.
+    MoonEP implements shared NVLink/NVSwitch memory, including multi-node NVLink fabric; it does not implement
+    this arbitrary IB payload path. NIC sharing, switch contention, and wire overhead are omitted.
+    The topology controls change costs, not allocation decisions.</p>
+    <p><a href="https://huggingface.co/moonshotai/Kimi-K3/blob/main/README.md">K3's preset</a> describes its routed
+    expert dimensions; latent projections and its full quantized compute path are outside this model.
+    Its <a href="https://arxiv.org/html/2607.24653v1#S5.SS2">training report</a> describes shared-expert stream
+    overlap and reconstructing expert inputs by redispatching saved token-major inputs. Those require a
+    different memory/compute schedule. Likewise, async gradient reduction can overlap independent work only
+    with correct events and shared-pool lifetimes; this timeline includes it in the total.</p>
+  </details>
 
-  <h3 style="margin:20px 0 4px">Memory: reserved once, breathing never</h3>
+  <h3 id="weight-tradeoff" style="margin:20px 0 4px">When does moving weights pay off?</h3>
+  <p style="font-size:13.5px">The first breakeven is an <b>overlap threshold</b>: can independent shared-expert
+  computation cover the time to dispatch tokens and prefetch foreign weights? Kimi K3 has
+  <b>two full-width shared experts</b> per MoE layer: D = 7,168 and intermediate width 3,072 each.
+  Its routed experts use H = 3,584, H′ = 3,072, E = 896 and K = 16. Shared weights are replicated
+  across EP ranks, and their GEMMs run on a separate stream.
+  <a href="https://arxiv.org/html/2607.24653v1#S2.SS3">Architecture</a> ·
+  <a href="https://arxiv.org/html/2607.24653v1#S5.SS2">Training schedule</a>.</p>
+  <div class="btnrow"><button class="btn" id="overlapK3">Load Kimi K3 training shape</button></div>
+  <div class="paramrow" style="display:flex;flex-wrap:wrap;gap:16px;margin:10px 0">
+    <label>Shared GEMMs · effective TFLOP/s <input id="sharedTF" type="range" min="100" max="3000" step="50" value="400"><span class="v" id="sharedTFValue"></span></label>
+    <label>Shared compute available for startup overlap <input id="overlapWindow" type="range" min="0" max="100" step="5" value="100"><span class="v" id="overlapWindowValue"></span></label>
+  </div>
+  <p class="kbd-note" id="sharedShapeNote"></p>
+  <p style="font-size:13.5px">For the chosen shared branch, forward GEMM time is
+  <b>T<sub>shared</sub> = 6·S·N<sub>s</sub>·D·I<sub>s</sub> / F<sub>shared</sub></b>.
+  The available window is η·T<sub>shared</sub>. η = 100% assumes the entire branch can cover startup;
+  lower it for late routing/latent-input readiness or work reserved for another overlap window.
+  These are effective rates under concurrent communication, not isolated hardware peaks.</p>
+  <div id="tradeoffNote" class="kbd-note" style="margin:8px 0"></div>
+  <div class="scrollwin" style="overflow-x:auto"><table class="t" id="overlapTable" aria-label="token and weight transfer hiding thresholds"></table></div>
+  <svg id="overlapChart" width="100%" height="220" role="img" aria-label="available shared compute and dispatch plus prefetch time versus tokens per rank"></svg>
+  <div class="legendrow"><span class="li" style="--lc:var(--s3)">available shared forward compute</span><span class="li" style="--lc:var(--s2)">planning + dispatch + prefetch</span><span class="li" style="--lc:var(--s7)">current S</span></div>
+  <details class="kbd-note" style="margin-top:8px">
+    <summary><b>Deriving the breakeven points</b></summary>
+    <p>For each rank, link class and direction j, let W<sub>j</sub> be its selected foreign-weight
+    bytes and A<sub>j</sub> its off-rank token bytes per input token. Forward token bytes include
+    deduplicated BF16 hidden rows and fp32 route weights. Count both donor egress and receiver ingress:
+    many receivers can make the weight owner the bottleneck. Traffic sharing a port adds.</p>
+    <p>T<sub>ready</sub>(S) = L + max<sub>j</sub>[(W<sub>j</sub> + A<sub>j</sub>·S) / BW<sub>j</sub>].
+    With c = η·6·N<sub>s</sub>·D·I<sub>s</sub>/F<sub>shared</sub>, full hiding requires
+    T<sub>ready</sub>(S) ≤ c·S. Thus <b>S* = ceil(max<sub>j</sub>[(L + W<sub>j</sub>/BW<sub>j</sub>) /
+    (c − A<sub>j</sub>/BW<sub>j</sub>)])</b>. If an active port's token slope already meets or exceeds
+    the window slope and has a positive fixed cost, no finite S hides it. Faster shared GEMMs shorten
+    this window; that alone does not mean the layer gets slower.</p>
+    <p>The curves freeze the current route fractions, prefetch selections and effective bandwidths
+    while scaling S. They are a local extrapolation, not new planner runs or a K3 routing trace.
+    The model pools token and weight bytes within each direction, assumes full duplex and independent
+    link classes, and permits scheduling them freely after planning. L = 20 µs for forward; backward
+    reuses the plan and uses L = 0. Real ordering, SM/HBM contention, readiness, launches and synchronization
+    can expose more time. Recheck after changing routing or B. An IB island remains hypothetical.</p>
+  </details>
+  <p class="kbd-note">The backward row uses twice the shared forward matmul work to cover reverse-combine
+  dispatch and restored weights. It is a separate window. The forward window cannot also hide the final
+  combine, and neither startup test hides later weight-gradient reduction. Inference overflow weights
+  are read inside GEMM and are not counted as prefetched or hidden here. The synchronized timeline and
+  memory chart above/below retain their original schedule; this panel explores an alternative.</p>
+
+  <h3 style="margin:20px 0 4px">The second breakeven: versus a fused megakernel</h3>
+  <p style="font-size:13.5px"><a href="https://cursor.com/blog/mixture-of-kittens">Mixture-of-Kittens</a>
+  already covers initial dispatch with shared-expert work, pipelines token communication with routed
+  GEMMs, and overlaps the last reverse-dispatches with weight-gradient GEMMs. It keeps routed weights
+  on their owners. Full hiding of MoonEP's startup transfers is therefore useful, but <b>is not itself
+  a crossover against MoK</b>.</p>
+  <div id="fusedComparison" class="kbd-note" style="margin:8px 0"></div>
+  <p class="kbd-note">For this forward-only comparison, assume shared and routed GEMMs consume the same
+  compute resource sequentially at their stated effective rates. Both routed layouts use the simulator's
+  128-row segment padding. Give an ideal owner-compute fused
+  baseline zero exposed communication, planning, copies or pipeline tails:
+  T<sub>fused,ideal</sub> = T<sub>shared</sub> + G<sub>owner,max</sub>.
+  Our illustrative MoonEP schedule costs T<sub>shared</sub> + max(0, T<sub>ready</sub> − η·T<sub>shared</sub>)
+  + G<sub>balanced,max</sub> + C<sub>remaining</sub>. C includes the existing model's duplicate expansion,
+  boundary copies, folding, final combine, and any additive overflow-GEMM service cost.
+  Balancing has room to win when <b>G<sub>owner,max</sub> − G<sub>balanced,max</sub> exceeds exposed startup
+  plus C<sub>remaining</sub></b>. This is a comparison against an idealized reference at equal routed
+  throughput, not a measured MoK prediction.</p>
+  <p class="kbd-note">A measured crossover needs matching K3 inputs, routing, precision, hardware and SM
+  allocation, including latent projections, SiTU-GLU, backward and gradient reduction. The public
+  <a href="https://github.com/cursor/mixture-of-kittens">MoK implementation</a> targets DSV3-style
+  BF16/MXFP8 training; its published shapes do not establish a K3 LatentMoE or MXFP4 crossover.
+  Balanced owners have no compute imbalance to recover; a hot expert or home group can create relief,
+  but also concentrates weight service on its owner.</p>
+
+  <h3 style="margin:20px 0 4px">Memory: logical storage and lifetimes</h3>
   <p style="font-size:13.5px;margin:2px 0 6px">
-  One rank's memory over the same time axis as the timeline above. Every MoonEP band is
-  <b>reserved at t = 0</b>, before the router routes a single token — the light fill is the static
-  reservation, the solid fill is what's actually occupied as the layer runs. The only memory that
-  appears and disappears is the framework's own GEMM activations. That flatness is the point:
-  fully static shapes, no per-layer allocation, no fragmentation, no OOM at any imbalance
-  (README's comparison vs dynamic EP). Hover any band for its formula.
+  One identified rank, on the timeline above. Light bands are persistent buffers or layer parameters;
+  solid bands are independently allocated plans, API outputs, and framework tensors for the chosen
+  saved-activation schedule. Bands show logical tensor bytes, <b>before hardware-dependent VMM/multicast
+  granularity and allocator rounding</b>. They are not a measured physical allocation trace.
+  Static capacity bounds routing storage; the API still allocates outputs and plans, and whole-model memory
+  depends on layers, live microbatches, and the framework. Hover a band for its formula and lifetime.
   </p>
-  <svg id="memChart" width="100%" height="250" role="img" aria-label="per-rank memory reservation and occupancy over one layer"></svg>
+  <svg id="memChart" width="100%" height="250" role="img" aria-label="logical storage lifetimes for one rank"></svg>
   <div class="legendrow" id="memLeg"></div>
   <div class="kbd-note" id="memNote" style="margin-top:6px"></div>
 
 </div>
 </div><!-- /flowgrid -->
 
-<div class="footer-note">Distilled from the full MoonEP walkthrough; traffic is computed by a verified
-port of planning.py Steps 1–4 + C2 destination math + per-token dedup — not a heuristic.</div>
+<div class="footer-note">Allocation and dedup counts were checked against the Torch reference on CPU.
+Timing is an uncalibrated cost model; logical memory sizes exclude physical allocation rounding.
+GPU behavior and latency require multi-GPU NVLink tests and benchmark calibration.</div>
 <nav class="post-nav" style="margin-top:28px"><a href="/">← All posts</a></nav>
 </main>
 <script>
@@ -438,19 +583,22 @@ function bindParams(rootSel,obj,onchange){
   onchange(); // one render after all params are read, not one per slider
 }
 /* ============ routing flow visualizer ============ */
-const FLOW={S:4096,K:8,E:384,R:8,ns:8,H:7168,Hp:2048,nvl:450,ib:400,tf:400,prec:'bf16'};
+const FLOW={S:4096,K:8,E:384,R:8,ns:8,H:7168,Hp:2048,nvl:450,ib:400,tf:400,prec:'bf16',BInfer:4,remotePasses:1};
+const TOKEN_PADDING=128;
 const isInfer=()=>FLOW.prec==='mxfp4';
 // bf16 = 2 B/elem; MXFP4 = packed 4-bit + one E8M0 scale per 32 elems = 0.53125 B/elem
+const slotBudget=epn=>isInfer()?Math.max(1,Math.min(epn,Math.floor(FLOW.BInfer||4))):epn;
 const wtCopyB=()=>3*FLOW.H*FLOW.Hp*(isInfer()?0.53125:2);
 const precTag=()=>isInfer()?'mxfp4 packed + scales':'bf16';
 let flowSeed=99, flowScenario='skew', flowState=null;
 function computeFlow(alpha,scenario){
   const {S,K}=FLOW, R=FLOW.R;
-  const epn=Math.max(1,Math.floor(FLOW.E/R)), E=epn*R, N=S*K, CAP=N, B=epn;
+  const epn=Math.max(1,Math.floor(FLOW.E/R)), E=epn*R, N=S*K, CAP=N, B=slotBudget(epn);
   const Kc=Math.min(K,E);
   const rnd=mulberry32(flowSeed);
   const randn=()=>{const u=Math.max(rnd(),1e-9),v=rnd();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);};
   // --- per-token top-k (distinct experts), per rank ---
+  let routingFallbacks=0;
   const topk=[]; // [R] -> flat Int16Array S*Kc
   if(scenario==='hot'){
     for(let r=0;r<R;r++){
@@ -476,7 +624,7 @@ function computeFlow(alpha,scenario){
             while(lo<hi){const m=(lo+hi)>>1; if(cum[m]<u)lo=m+1;else hi=m;}
             if(!used[lo])pick=lo;
           }
-          if(pick<0){for(let e=0;e<E;e++)if(!used[e]){pick=e;break;}} // rejection bailed: take first unused
+          if(pick<0){routingFallbacks++;for(let e=0;e<E;e++)if(!used[e]){pick=e;break;}} // rejection bailed: take first unused
           used[pick]=1; row[t*Kc+k]=pick;
         }
       }
@@ -536,12 +684,21 @@ function computeFlow(alpha,scenario){
       if(bv>0){wArrows.push({from:Math.floor(bi/epn),to:dest,e:bi,n:cnt[bi]});dupExperts++;}
     }
   }
+  const selected=new Set(wArrows.map(a=>a.to*E+a.e));
+  const wOverflow=[];
+  for(let dest=0;dest<R;dest++)for(let e=0;e<E;e++){
+    if(alloc[dest][e]>0&&Math.floor(e/epn)!==dest&&!selected.has(dest*E+e))
+      wOverflow.push({from:Math.floor(e/epn),to:dest,e,n:alloc[dest][e]});
+  }
   // --- C2 destination math + per-token dedup (planning.py:1050-1113) ---
   const tpeCumPrev=Array.from({length:R},()=>new Array(E).fill(0));
   for(let e=0;e<E;e++){let c=0;for(let r=0;r<R;r++){tpeCumPrev[r][e]=c;c+=tpe[r][e];}}
   const allocCum=Array.from({length:E},()=>new Array(R).fill(0));
   for(let e=0;e<E;e++){let c=0;for(let r=0;r<R;r++){c+=alloc[r][e];allocCum[e][r]=c;}}
   const tok=Array.from({length:R},()=>new Array(R).fill(0));
+  const entries=Array.from({length:R},()=>new Array(R).fill(0));
+  const dupGroups=new Array(R).fill(0), groupedStamp=new Int32Array(R);
+  const paddedRows=alloc.map(row=>row.reduce((sum,n)=>sum+Math.ceil(n/TOKEN_PADDING)*TOKEN_PADDING,0));
   const expLoc=new Array(E).fill(0);
   let dupSaved=0;
   const seenStamp=new Int32Array(R); let stamp=0; // bitmask would overflow past rank 31
@@ -555,12 +712,16 @@ function computeFlow(alpha,scenario){
         const ac=allocCum[e];
         let lo=0,hi=R-1; while(lo<hi){const m=(lo+hi)>>1; if(ac[m]<=gI)lo=m+1;else hi=m;}
         const d=lo;
-        if(seenStamp[d]===stamp)dupSaved++; else{seenStamp[d]=stamp; tok[r][d]++;}
+        entries[r][d]++;
+        if(seenStamp[d]===stamp){
+          dupSaved++;
+          if(groupedStamp[d]!==stamp){dupGroups[d]++;groupedStamp[d]=stamp;}
+        }else{seenStamp[d]=stamp;tok[r][d]++;}
         if(d===r)expLoc[e]++;
       }
     }
   }
-  return {tok,wArrows,dupSaved,dupExperts,nMoves,maxvio,E,epn,R,N,groupTokens,T,alloc,expLoc,moves,takes};
+  return {tok,wArrows,B,wOverflow,entries,dupGroups,paddedRows,routingFallbacks,dupSaved,dupExperts,nMoves,maxvio,E,epn,R,N,groupTokens,T,alloc,expLoc,moves,takes};
 }
 function fmtT(s){ if(s>=0.1) return s.toFixed(2)+' s'; if(s>=1e-3) return (s*1e3).toFixed(2)+' ms'; return (s*1e6).toFixed(1)+' µs'; }
 function nodeOf(r){const ns=Math.max(1,Math.min(FLOW.ns||FLOW.R,FLOW.R));return Math.floor(r/ns);}
@@ -569,15 +730,18 @@ function pairTip(s,d){
   const st=flowState, {H,Hp}=FLOW;
   const rows=st.tok[s][d], tokB=rows*H*2;
   const wl=st.wArrows.filter(a=>a.from===s&&a.to===d);
-  const wB=wl.length*wtCopyB(), tot=tokB+wB;
+  const metaB=st.entries[s][d]*4, wB=wl.length*wtCopyB(), tot=tokB+metaB+wB;
   const pct=x=>tot?Math.round(100*x/tot):0;
-  let h=`<div class="tt-v">total ${fmtB(tot)} on this edge</div>`;
+  let h=`<div class="tt-v">forward dispatch + prefetch payload: ${fmtB(tot)}</div>`;
   h+=`<div>tokens: ${fmtN(rows)} rows × [${fmtN(H)}] bf16 = <b>${fmtB(tokB)}</b> (${pct(tokB)}%)</div>`;
+  h+=`<div>route weights: ${fmtN(st.entries[s][d])} entries × 4 B = ${fmtB(metaB)}; control/transport overhead excluded</div>`;
   if(wl.length)
     h+=`<div>weights: ${wl.map(a=>'e'+a.e).join(', ')} — per expert gate/up [${fmtN(H)}×${fmtN(Hp)}] + down [${fmtN(Hp)}×${fmtN(H)}] ${precTag()} = 3 × ${fmtB(wtCopyB()/3)} → <b>${fmtB(wB)}</b> (${pct(wB)}%)</div>`;
   else
     h+=`<div>weights: none on this edge (0%)</div>`;
-  h+=`<div>link: ${crossNode(s,d)?'cross-node \u2014 InfiniBand':'same node \u2014 NVLink'}</div>`;
+  const overflow=st.wOverflow.filter(a=>a.from===s&&a.to===d);
+  if(overflow.length)h+=`<div>Separate GEMM reads: ${overflow.map(a=>'e'+a.e).join(', ')} · ${fmtB(overflow.length*wtCopyB()*FLOW.remotePasses)} at ${FLOW.remotePasses} assumed weight pass(es), not included in the forward dispatch + prefetch total above.</div>`;
+  h+=`<div>link: ${crossNode(s,d)?'hypothetical IB edge':'same NVLink domain'}</div>`;
   return h;
 }
 function drawFlow(){
@@ -604,7 +768,7 @@ function drawFlow(){
       mk('line',{x1:q1.x,y1:q1.y,x2:q2.x,y2:q2.y,stroke:'var(--baseline)','stroke-width':1,'stroke-dasharray':'3 4'});
       const mid=angOf(b*nsz+(Math.min(nsz,R-b*nsz)-1)/2);
       const lp=pt2(rad+30,mid);
-      const t=mk('text',{x:lp.x,y:lp.y+3,'text-anchor':'middle','font-size':10,fill:'var(--muted)'});t.textContent='node '+b;
+      const t=mk('text',{x:lp.x,y:lp.y+3,'text-anchor':'middle','font-size':10,fill:'var(--muted)'});t.textContent='island '+b;
     }
   }
   const arrow=(p1,p2,color,width,tip,dash)=>{
@@ -649,10 +813,12 @@ function drawFlow(){
     const t=mk('text',{x:pos[r].x,y:pos[r].y+(nodeR>=12?4:2.5),'text-anchor':'middle','font-size':nodeR>=12?12:7.5,'font-weight':700,fill:'var(--ink)'},g);
     t.textContent=nodeR>=12?('r'+r):r;
     const egB=eg*H*2,inB=ing*H*2,weB=wEg*wtBytes,wiB=wIn*wtBytes;
+    const egMeta=st.entries[r].reduce((sum,n,d)=>sum+(d===r?0:n*4),0);
+    const inMeta=st.entries.reduce((sum,row,s)=>sum+(s===r?0:row[r]*4),0);
     g.addEventListener('mousemove',ev=>showTT(ev,
       `<div class="tt-t">rank ${r}</div>`+
-      `<div class="tt-v">egress ${fmtB(egB+weB)} = tokens ${fmtN(eg)}×[${fmtN(H)}] bf16 (${fmtB(egB)}) + ${wEg} weight cop${wEg===1?'y':'ies'} (${fmtB(weB)})</div>`+
-      `<div class="tt-v">ingress ${fmtB(inB+wiB)} = tokens ${fmtN(ing)}×[${fmtN(H)}] bf16 (${fmtB(inB)}) + ${wIn} weight cop${wIn===1?'y':'ies'} (${fmtB(wiB)})</div>`+
+      `<div class="tt-v">forward payload egress ${fmtB(egB+weB+egMeta)} = hidden ${fmtN(eg)}×[${fmtN(H)}] bf16 (${fmtB(egB)}) + ${wEg} weight cop${wEg===1?'y':'ies'} (${fmtB(weB)}) + route weights ${fmtB(egMeta)}</div>`+
+      `<div class="tt-v">forward payload ingress ${fmtB(inB+wiB+inMeta)} = hidden ${fmtN(ing)}×[${fmtN(H)}] bf16 (${fmtB(inB)}) + ${wIn} weight cop${wIn===1?'y':'ies'} (${fmtB(wiB)}) + route weights ${fmtB(inMeta)}</div>`+
       `<div>${fmtN(tok[r][r])} rows stay local (HBM, not NVLink)</div>`));
     g.addEventListener('mouseleave',hideTT);
   }
@@ -709,15 +875,43 @@ function clampNS(){ // node size can never exceed R; the top slider slot means "
   FLOW.ns=Math.min(2**+inp.value,FLOW.R);
   const vs=inp.parentElement.querySelector('.v'); if(vs)vs.textContent=fmtN(FLOW.ns);
 }
+function normalizeExperts(){
+  const inp=document.querySelector('input[data-p="E"]');
+  const step=Math.max(16,FLOW.R);
+  const effective=Math.max(step,Math.floor(FLOW.E/step)*step);
+  FLOW.E=effective;
+  inp.min=step;inp.step=step;inp.value=effective;
+  const vs=inp.parentElement.querySelector('.v');if(vs)vs.textContent=fmtN(effective);
+}
+function hotSummary(st){
+  const active=st.T.map((n,e)=>n?e:-1).filter(e=>e>=0);
+  const split=active.filter(e=>st.alloc.filter(row=>row[e]>0).length>1).length;
+  const owners=[...new Set(active.map(e=>Math.floor(e/st.epn)))];
+  const servers=[...new Set(st.wArrows.map(a=>a.from))];
+  const cells=st.tok.flat(), min=Math.min(...cells), max=Math.max(...cells);
+  return `Every token selects e0–e${active.length-1}, owned by ${owners.map(r=>'r'+r).join(', ')}. `+
+    `${active.length-split} hot experts stay whole; ${split} split across destinations. `+
+    (servers.length?`Weight-copy sources: ${servers.map(r=>'r'+r).join(', ')}. `:'No weight copies are needed. ')+
+    (min===max?`Every matrix cell contains ${fmtN(min)} unique rows.`:`Matrix cells range from ${fmtN(min)} to ${fmtN(max)} unique rows.`);
+}
+function renderCounts(){
+  const st=flowState;
+  $('#countTable').innerHTML='<tr><th>destination</th><th class="n">real entries</th><th class="n">unique rows</th><th class="n">off-rank rows</th><th class="n">padded GEMM rows</th></tr>'+
+    st.alloc.map((row,d)=>{
+      const unique=st.tok.reduce((sum,src)=>sum+src[d],0);
+      return `<tr><td>${rankSw(d)}r${d}</td><td class="n">${fmtN(row.reduce((a,b)=>a+b,0))}</td><td class="n">${fmtN(unique)}</td><td class="n">${fmtN(unique-st.tok[d][d])}</td><td class="n">${fmtN(st.paddedRows[d])}</td></tr>`;
+    }).join('');
+}
 function renderFlow(){
   clampNS();
+  normalizeExperts();
   const alpha=+$('#flowskew').value;
   $('#flowskewv').textContent=(alpha/10).toFixed(1);
   const st=computeFlow(alpha,flowScenario);
   flowState=st;
   const mesh=drawFlow()||{pairs:0,meanV:0};
   const {R,tok,wArrows}=st,{H,Hp,nvl,ib}=FLOW;
-  $('#flowvio').textContent=`maxvio = ${st.maxvio.toFixed(2)} · ${st.dupExperts} dup experts · ${st.nMoves} moves`;
+  $('#flowvio').textContent=`maxvio = ${st.maxvio.toFixed(2)} · ${st.dupExperts} prefetched copies · ${st.wOverflow.length} overflow segments · ${st.nMoves} moves`;
   const wtB=wtCopyB();
   const Eeff=st.E===FLOW.E?'':` E rounded to ${st.E} (= ${st.epn}·R so every rank owns ${st.epn}).`;
   const meshTxt=!mesh.pairs?'No cross-rank token traffic — every row stays local. '
@@ -730,7 +924,10 @@ function renderFlow(){
     }).join('');
   $('#flowNote').innerHTML=meshTxt+
     `Per-token payload row = H×2 B = ${fmtB(H*2)} (always bf16); one duplicated expert = ${fmtB(wtB)} (${precTag()}).${Eeff}`+
-    (flowScenario==='hot'?` <b>Pathological mode:</b> every token on every rank picks rank 0's ${Math.min(FLOW.K,st.epn)===FLOW.K?'':'(and following) '}experts. ${FLOW.K>=st.epn?'With K ≥ epn, each hot expert is handed <i>wholly</i> to one destination. Token traffic becomes a perfectly uniform all-to-all: S·K/R rows on every pair, a flat matrix — the same density as balanced routing.':'With K &lt; epn, each hot expert is <i>split</i> across several destinations, and the source-rank-major cut hands each source its nearest slice. Much of the token traffic stays home — watch the matrix diagonal darken. (At K = 1 everything would stay local.)'} Either way, rank 0 becomes the weight server.`:'');
+    (flowScenario==='hot'?` <b>Hot routing:</b> ${hotSummary(st)}`:
+      ` Synthetic skew sampler: ${fmtN(st.routingFallbacks)} picks used the 64-attempt fallback to the first unused expert. α is not calibrated to the repository benchmark.`);
+  renderCounts();
+  renderSlots();
   renderExpertPanel();
   balStep=0;
   renderBalanceLog();
@@ -776,7 +973,8 @@ function renderBalanceLog(){
       html+=`; ${rk(m.from)} now ${m.donorAfter>0?'+'+fmtN(m.donorAfter):'<b>0</b>'}`;
     html+=`</div>`;
     takes.filter(t=>t.owner===m.from&&t.target===m.to).forEach(t=>{
-      html+=`<div style="color:var(--ink-2)${cur?';background:var(--code-hl);border-radius:6px;padding:1px 8px':''}">&nbsp;&nbsp;&nbsp;\u2514 expert e${t.e}: ${fmtN(t.take)} entries \u2192 ${rk(m.to)} \u00b7 weight copy ${rk(m.from)} \u2192 ${rk(m.to)} (${fmtB(wtB)}${isInfer()?'':`, + ${fmtB(3*H*Hp*4)} fp32 back in reduce_grad`})</div>`;
+      const prefetched=st.wArrows.some(a=>a.to===t.target&&a.e===t.e);
+      html+=`<div style="color:var(--ink-2)${cur?';background:var(--code-hl);border-radius:6px;padding:1px 8px':''}">&nbsp;&nbsp;&nbsp;\u2514 expert e${t.e}: ${fmtN(t.take)} entries \u2192 ${rk(m.to)} \u00b7 ${prefetched?'prefetch':'remote GEMM read'} ${rk(m.from)} \u2192 ${rk(m.to)} (${fmtB(wtB*(prefetched?1:FLOW.remotePasses))}${isInfer()?'':`, + ${fmtB(3*H*Hp*4)} fp32 back in reduce_grad`})</div>`;
     });
   });
   if(k<n){
@@ -811,12 +1009,14 @@ function renderExpertPanel(){
   const expTip=e=>{
     const owner=Math.floor(e/epn);
     const reps=wArrows.filter(a=>a.e===e).map(a=>a.to);
-    const split=[]; for(let d=0;d<R;d++)if(alloc[d][e])split.push(`r${d}: ${fmtN(alloc[d][e])}${reps.includes(d)?' (replica)':''}`);
+    const overflow=st.wOverflow.filter(a=>a.e===e).map(a=>a.to);
+    const split=[]; for(let d=0;d<R;d++)if(alloc[d][e])split.push(`r${d}: ${fmtN(alloc[d][e])}${reps.includes(d)?' (prefetched)':overflow.includes(d)?' (remote weight read)':''}`);
     const loc=expLoc[e], rem=T[e]-loc;
     return `<div class="tt-t">expert e${e} · owner r${owner}</div>`+
-      `<div class="tt-v">${fmtN(T[e])} entries (${(100*T[e]/total).toFixed(1)}%): ${fmtN(loc)} stay on their source rank, ${fmtN(rem)} cross NVLink (≤ ${fmtB(rem*H*2)})</div>`+
+      `<div class="tt-v">${fmtN(T[e])} entries (${(100*T[e]/total).toFixed(1)}%): ${fmtN(loc)} stay on their source rank, ${fmtN(rem)} go off-rank (hidden-payload upper bound ${fmtB(rem*H*2)} before dedup)</div>`+
       `<div>computed on: ${split.join(' · ')||'no tokens'}</div>`+
-      (reps.length?`<div>weights: copied to ${reps.map(d=>'r'+d).join(', ')} · ${fmtB(reps.length*wtCopyB())}</div>`:`<div>weights: stay on r${owner}</div>`);
+      (reps.length?`<div>weights: prefetched to ${reps.map(d=>'r'+d).join(', ')} · ${fmtB(reps.length*wtCopyB())}</div>`:`<div>no explicit prefetch for this expert</div>`)+
+      (overflow.length?`<div>weights read remotely from r${owner} by ${overflow.map(d=>'r'+d).join(', ')} during GEMM</div>`:'');
   };
   for(let e=0;e<E;e++){
     const owner=Math.floor(e/epn);
@@ -878,9 +1078,8 @@ function renderRankBal(){
     hit.addEventListener('mousemove',ev=>showTT(ev,
       `<div class="tt-t">rank ${r}</div>`+
       `<div class="tt-v">attracted ${fmtN(gt[r])} entries, capacity ${fmtN(cap)}</div>`+
-      `<div>${v>0?'over by '+fmtN(v)+' — the balance step moves this many entries off r'+r:
-        v<0?'under by '+fmtN(-v)+' — the balance step fills r'+r+' with this many entries':
-        'exactly at capacity — untouched by the balance step'}</div>`));
+      `<div>net ${v>=0?'export':'import'} requirement: ${fmtN(Math.abs(v))} entries</div>`+
+      `<div>gross home-group exports: ${fmtN(st.moves.filter(m=>m.from===r).reduce((a,m)=>a+m.n,0))}; imports: ${fmtN(st.moves.filter(m=>m.to===r).reduce((a,m)=>a+m.n,0))}. Tokens travel from their source ranks; weights travel from their owners.</div>`));
     hit.addEventListener('mouseleave',hideTT);
   }
 }
@@ -888,225 +1087,333 @@ function renderRankBal(){
 const MIXPCT=[100,52,76,34,64,24,88,44,16]; // lightness ladder: 9 tiers × 8 hues = 72 ranks
 const rankColor=d=>{const h=(d%8)+1,t=Math.floor(d/8)%9;return t?`color-mix(in oklab, var(--s${h}) ${MIXPCT[t]}%, white)`:`var(--s${h})`;};
 const rankSw=d=>`<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${rankColor(d)};margin:0 4px 0 1px"></span>`;
-/* ---- per-rank layer runtime: phases, barriers, structural waits ---- */
-function rtModel(bwN,bwI){
-  const st=flowState;
-  const {R,tok,wArrows}=st, N=st.N, {H,Hp,tf}=FLOW;
-  const F=(tf||400)*1e12, HBM=3.3e12, wtB=wtCopyB();
-  const tPlan=20e-6, gemm=2*N*H*Hp*3/F;
-  const per=[];
-  for(let r=0;r<R;r++){
-    let egN=0,egX=0,inN=0,inX=0,uniq=0;
-    for(let d=0;d<R;d++)if(d!==r){ if(crossNode(r,d))egX+=tok[r][d]; else egN+=tok[r][d]; }
-    for(let s=0;s<R;s++){ uniq+=tok[s][r]; if(s!==r){ if(crossNode(s,r))inX+=tok[s][r]; else inN+=tok[s][r]; } }
-    const dups=Math.max(0,N-uniq);
-    let wEgN=0,wEgX=0,wInN=0,wInX=0;
-    wArrows.forEach(a=>{
-      const x=crossNode(a.from,a.to);
-      if(a.from===r){x?wEgX++:wEgN++;}
-      if(a.to===r){x?wInX++:wInN++;}
-    });
-    // intra-node (NVLink) and inter-node (IB) transfers ride different links, in parallel
-    const disp=Math.max(Math.max(egN,inN)*H*2/bwN, Math.max(egX,inX)*H*2/bwI);
-    const pref=Math.max(Math.max(wEgN,wInN)*wtB/bwN, Math.max(wEgX,wInX)*wtB/bwI);
-    per.push({
-      eg:egN+egX,inn:inN+inX,egX,inX,dups,wEg:wEgN+wEgX,wIn:wInN+wInX,wEgX,wInX,gemm,
-      disp, epi:dups*H*2/HBM, pro:2*dups*H*2/HBM, pref, grd:isInfer()?0:2*pref,
-    });
+function renderSlots(){
+  const st=flowState, train=!isInfer(), wtB=wtCopyB();
+  const budget=$('#slotBudget'), passes=$('#remotePasses');
+  budget.max=st.epn;budget.value=st.B;budget.disabled=train;
+  passes.value=FLOW.remotePasses;passes.disabled=train;
+  $('#slotBudgetValue').textContent=`${st.B} / ${st.epn}`;
+  $('#remotePassesValue').textContent=FLOW.remotePasses+'×';
+  $('#slotsFour').disabled=train;$('#slotsFull').disabled=train;
+  const saved=(st.epn-st.B)*wtB, prefBytes=st.wArrows.length*wtB;
+  const overflowBytes=st.wOverflow.length*wtB*FLOW.remotePasses;
+  $('#slotNote').innerHTML=(train?'Training: B is fixed at E/R. Select infer MXFP4 above to explore smaller pools. ':`Inference: <b>${fmtB(saved)}</b> less reserved prefetch storage per rank than B = E/R. `)+
+    `${st.wArrows.length} prefetched expert segments (${fmtB(prefBytes)} across all ranks); `+
+    `${st.wOverflow.length} overflow segments (${fmtB(overflowBytes)} assumed GEMM weight payload). `+
+    `At one weight pass, moving a segment out of the prefetch pool shifts its weight traffic into GEMM rather than removing it.`;
+  $('#slotTable').innerHTML='<tr><th>destination</th><th class="n">prefetched / B</th><th class="n">overflow experts</th><th class="n">overflow GEMM rows</th><th class="n">assumed weight reads</th></tr>'+
+    Array.from({length:st.R},(_,r)=>{
+      const pref=st.wArrows.filter(a=>a.to===r), remote=st.wOverflow.filter(a=>a.to===r);
+      const ids=remote.map(a=>'e'+a.e).join(', ')||'none';
+      return `<tr><td>${rankSw(r)}r${r}</td><td class="n" title="${pref.map(a=>'e'+a.e).join(', ')||'none'}">${pref.length} / ${st.B}</td><td class="n" title="${ids}">${remote.length}</td><td class="n">${fmtN(remote.reduce((sum,a)=>sum+Math.ceil(a.n/TOKEN_PADDING)*TOKEN_PADDING,0))}</td><td class="n">${fmtB(remote.length*wtB*FLOW.remotePasses)}</td></tr>`;
+    }).join('');
+}
+const OVERLAP={tf:400,eta:1};
+function sharedBranch(){
+  const k3=FLOW.H===3584&&FLOW.Hp===3072;
+  return {k3,n:k3?2:1,D:k3?7168:FLOW.H,I:FLOW.Hp};
+}
+// Each port is one rank × link class × direction. Shared-port bytes add.
+function overlapPorts(){
+  const {R,tok,entries,wArrows}=flowState, {H,S}=FLOW;
+  const ports=Array.from({length:R*4},(_,j)=>({rank:Math.floor(j/4),link:j%4<2?'NVLink':'hypothetical IB',
+    dir:j%2?'ingress':'egress',bw:(j%4<2?FLOW.nvl:FLOW.ib)*1e9,weights:0,copies:0,hidden:0,route:0}));
+  const addPair=(s,d,fn)=>{const x=crossNode(s,d)?2:0;fn(ports[s*4+x]);fn(ports[d*4+x+1]);};
+  for(let s=0;s<R;s++)for(let d=0;d<R;d++)if(s!==d)
+    addPair(s,d,p=>{p.hidden+=tok[s][d]*H*2/S;p.route+=entries[s][d]*4/S;});
+  wArrows.forEach(a=>addPair(a.from,a.to,p=>{p.weights+=wtCopyB();p.copies++;}));
+  return ports;
+}
+function hidingPhase(ports,c,L,S,backward=false){
+  const lines=ports.map(p=>({...p,a:L+p.weights/p.bw,b:(p.hidden+(backward?0:p.route))/p.bw}));
+  let threshold=1;
+  for(const p of lines){
+    const slope=c-p.b;
+    if(slope<0||(slope===0&&p.a>0)){threshold=null;break;}
+    if(slope>0)threshold=Math.max(threshold,Math.ceil(p.a/slope));
   }
-  const segC=p=>p.epi+p.pref+p.gemm+p.pro;       // fwd: epilogue, prefetch, GEMM, prologue
-  const segB=p=>p.epi+2*p.gemm+p.pro;            // bwd: epilogue, GEMM dX+dW, prologue
-  const maxDisp=Math.max(...per.map(p=>p.disp));
-  const maxC=Math.max(...per.map(segC));
-  const maxB2=Math.max(...per.map(segB));
-  const fwd=tPlan+maxDisp+maxC+maxDisp;          // combine's per-rank time mirrors dispatch
-  const bwd=isInfer()?0:maxDisp+maxB2+maxDisp;   // inference: no backward pass at all
-  return {per,segC,segB,maxDisp,maxC,maxB2,fwd,bwd,total:fwd+bwd,tPlan,wtB};
+  const limiting=lines.reduce((best,p)=>p.a+p.b*S>best.a+best.b*S?p:best,lines[0]);
+  const ready=limiting.a+limiting.b*S, window=c*S, exposed=Math.max(0,ready-window);
+  const service=ready-L, bandwidthScale=window>L?service/(window-L):service===0&&window>=L?0:null;
+  return {lines,c,L,threshold,limiting,ready,window,exposed,bandwidthScale};
+}
+function tradeoffModel(M){
+  const st=flowState, {H,Hp,tf,S}=FLOW, branch=sharedBranch(), ports=overlapPorts();
+  const sharedPerToken=6*branch.n*branch.D*branch.I/(OVERLAP.tf*1e12);
+  const shared=sharedPerToken*S;
+  const forward=hidingPhase(ports,OVERLAP.eta*sharedPerToken,20e-6,S);
+  const backward=isInfer()?null:hidingPhase(ports,2*OVERLAP.eta*sharedPerToken,0,S,true);
+  const ownerPadded=Array.from({length:st.R},(_,r)=>st.T.slice(r*st.epn,(r+1)*st.epn)
+    .reduce((sum,n)=>sum+Math.ceil(n/TOKEN_PADDING)*TOKEN_PADDING,0));
+  const ownerGemm=6*Math.max(...ownerPadded)*H*Hp/(tf*1e12), balancedGemm=Math.max(...M.per.map(p=>p.gemm));
+  const tail=M.phases.filter(p=>['fe','fc','fs','fr','fo'].includes(p.key)).reduce((sum,p)=>sum+p.duration,0);
+  // Match the existing additive GEMM/overflow phase without summing unrelated rank maxima.
+  const overflow=M.phases.find(p=>p.key==='fg').duration-balancedGemm;
+  const remaining=tail+overflow, relief=ownerGemm-balancedGemm;
+  const fusedIdeal=shared+ownerGemm, moonEstimate=shared+forward.exposed+balancedGemm+remaining;
+  return {branch,shared,sharedPerToken,forward,backward,ownerPadded,ownerGemm,balancedGemm,remaining,relief,
+    fusedIdeal,moonEstimate,headroom:fusedIdeal-moonEstimate};
+}
+function renderTradeoff(M){
+  const t=tradeoffModel(M), {S}=FLOW, b=t.branch, f=t.forward;
+  const signed=x=>(x<0?'−':'+')+fmtT(Math.abs(x));
+  $('#sharedTFValue').textContent=fmtN(OVERLAP.tf);
+  $('#overlapWindowValue').textContent=Math.round(OVERLAP.eta*100)+'%';
+  $('#sharedShapeNote').textContent=(b.k3?'K3 shared branch':'Illustrative shared branch for the current routed shape')+
+    `: ${b.n} × [${fmtN(b.D)} → ${fmtN(b.I)} → ${fmtN(b.D)}], replicated per EP rank. `+
+    (b.k3?'Routed dimensions, top-k, EP size and precision follow the dock.':'Load the K3 shape above for its two full-width shared experts.');
+  const threshold=p=>p.threshold===null?'No finite S':fmtN(p.threshold)+' tokens/rank';
+  $('#tradeoffNote').innerHTML=`At S = <b>${fmtN(S)}</b>, shared forward GEMMs supply <b>${fmtT(t.shared)}</b> of work; `+
+    `<b>${fmtT(f.window)}</b> is available for startup. Planning + token dispatch + selected weight prefetch need `+
+    `<b>${fmtT(f.ready)}</b>, leaving <b>${fmtT(f.exposed)}</b> exposed. `+
+    (f.exposed<=1e-12?'<b>The selected startup payload fits this window.</b> ':'<b>The selected startup payload does not yet fit.</b> ')+
+    (flowState.wOverflow.length?`${flowState.wOverflow.length} inference overflow segments still fetch weights inside GEMM; this is not full weight hiding. `:'')+
+    `Busiest startup port: r${f.limiting.rank} ${f.limiting.dir}, ${f.limiting.link}; `+
+    `${f.limiting.copies} expert copies (${fmtB(f.limiting.weights)}).`;
+  $('#overlapTable').innerHTML='<tr><th>Startup window</th><th class="n">available</th><th class="n">required</th><th class="n">exposed</th><th class="n">minimum S*</th><th class="n">BW multiplier needed at current S</th></tr>'+
+    [['forward',f],...(t.backward?[['backward',t.backward]]:[])].map(([name,p])=>`<tr><td>${name}</td><td class="n">${fmtT(p.window)}</td><td class="n">${fmtT(p.ready)}</td><td class="n">${fmtT(p.exposed)}</td><td class="n">${threshold(p)}</td><td class="n">${p.bandwidthScale===null?'No finite bandwidth':p.bandwidthScale.toFixed(2)+'× current'}</td></tr>`).join('');
+  $('#fusedComparison').innerHTML=`At the current S, ideal owner-compute fused forward: <b>${fmtT(t.fusedIdeal)}</b>; `+
+    `illustrative MoonEP forward with shared overlap: <b>${fmtT(t.moonEstimate)}</b>. `+
+    `Padded routed GEMM relief is <b>${signed(t.relief)}</b>${t.relief<0?' (balancing added padding)':''}; `+
+    `exposed startup + remaining costs are <b>${fmtT(f.exposed+t.remaining)}</b>. `+
+    `<b>Headroom against the idealized reference: ${signed(t.headroom)}</b>. `+
+    (t.headroom>0?'There is room to win even against this fully hidden-communication reference, if the assumed rates and schedule hold.':'This schedule does not beat the idealized reference; actual MoK timing could still lie above that reference.');
+  renderOverlapChart(t);
+}
+function renderOverlapChart(t){
+  const svg=$('#overlapChart'), W=svg.clientWidth||900, Hh=220, left=62,right=14,top=20,bottom=36;
+  const maxS=Math.min(65536,2**Math.ceil(Math.log2(Math.max(512,FLOW.S*2,(t.forward.threshold||0)*2))));
+  const minS=32, X=s=>left+(W-left-right)*Math.log2(s/minS)/Math.log2(maxS/minS);
+  const ready=s=>Math.max(...t.forward.lines.map(p=>p.a+p.b*s));
+  const ymax=Math.max(ready(maxS),t.forward.c*maxS)*1.08;
+  const Y=v=>Hh-bottom-(Hh-top-bottom)*v/ymax;
+  svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`);svg.innerHTML='';
+  const mk=(tag,attrs)=>{const el=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const k in attrs)el.setAttribute(k,attrs[k]);svg.appendChild(el);return el;};
+  for(let i=0;i<=3;i++){
+    const v=ymax*i/3;mk('line',{x1:left,x2:W-right,y1:Y(v),y2:Y(v),stroke:'var(--grid)'});
+    mk('text',{x:left-6,y:Y(v)+4,'text-anchor':'end','font-size':10,fill:'var(--muted)'}).textContent=fmtT(v);
+  }
+  const ticks=W<450?[minS,Math.round(Math.sqrt(minS*maxS)),maxS]:
+    [...new Set([32,128,512,2048,8192,32768,maxS].filter(s=>s<=maxS))].sort((a,b)=>a-b);
+  ticks.forEach(s=>{mk('text',{x:X(s),y:Hh-19,'text-anchor':s===maxS?'end':s===minS?'start':'middle','font-size':10,fill:'var(--muted)'}).textContent=fmtN(s);});
+  mk('text',{x:(left+W-right)/2,y:Hh-3,'text-anchor':'middle','font-size':10,fill:'var(--muted)'}).textContent='S · input tokens per rank (log scale; frozen routing profile)';
+  for(const [fn,color] of [[s=>t.forward.c*s,'--s3'],[ready,'--s2']]){
+    const points=Array.from({length:90},(_,i)=>{const s=minS*(maxS/minS)**(i/89);return `${X(s)},${Y(fn(s))}`;}).join(' ');
+    mk('polyline',{points,fill:'none',stroke:`var(${color})`,'stroke-width':2});
+  }
+  if(FLOW.S>=minS&&FLOW.S<=maxS)mk('line',{x1:X(FLOW.S),x2:X(FLOW.S),y1:top,y2:Hh-bottom,stroke:'var(--s7)','stroke-dasharray':'4 3'});
+  const at=t.forward.threshold;
+  if(at!==null&&at>=minS&&at<=maxS){
+    mk('circle',{cx:X(at),cy:Y(t.forward.c*at),r:4,fill:'var(--s3)'});
+    mk('text',{x:Math.min(W-right-4,Math.max(left+4,X(at))),y:Math.max(top+12,Y(t.forward.c*at)-10),'text-anchor':X(at)>W/2?'end':'start','font-size':11,fill:'var(--ink)'}).textContent='S* = '+fmtN(at);
+  }
+}
+
+/* ---- analytic phases; every boundary is synchronized by model convention ---- */
+function rtModel(bwN,bwI){
+  const st=flowState, {R,tok,entries,wArrows,wOverflow,N,epn,paddedRows,dupGroups}=st;
+  const {H,Hp,tf}=FLOW, F=tf*1e12, HBM=3.3e12, wtB=wtCopyB();
+  const NvS=N+2*epn*(TOKEN_PADDING-1), per=[];
+  for(let r=0;r<R;r++){
+    let egN=0,egX=0,inN=0,inX=0,metaEgN=0,metaEgX=0,metaInN=0,metaInX=0,uniq=0;
+    for(let d=0;d<R;d++)if(d!==r){
+      if(crossNode(r,d)){egX+=tok[r][d];metaEgX+=entries[r][d]*4;}
+      else{egN+=tok[r][d];metaEgN+=entries[r][d]*4;}
+    }
+    for(let s=0;s<R;s++){
+      uniq+=tok[s][r];
+      if(s!==r){
+        if(crossNode(s,r)){inX+=tok[s][r];metaInX+=entries[s][r]*4;}
+        else{inN+=tok[s][r];metaInN+=entries[s][r]*4;}
+      }
+    }
+    const dups=N-uniq, groups=dupGroups[r];
+    let wEgN=0,wEgX=0,wInN=0,wInX=0;
+    const reducedExperts=new Set();
+    wArrows.forEach(a=>{
+      if(a.from===r){crossNode(a.from,a.to)?wEgX++:wEgN++;reducedExperts.add(a.e);}
+      if(a.to===r){crossNode(a.from,a.to)?wInX++:wInN++;}
+    });
+    let overflowEgN=0,overflowEgX=0,overflowInN=0,overflowInX=0;
+    wOverflow.forEach(a=>{
+      if(a.from===r){crossNode(a.from,a.to)?overflowEgX++:overflowEgN++;}
+      if(a.to===r){crossNode(a.from,a.to)?overflowInX++:overflowInN++;}
+    });
+    const overflow=Math.max(Math.max(overflowEgN,overflowInN)*wtB*FLOW.remotePasses/bwN,
+      Math.max(overflowEgX,overflowInX)*wtB*FLOW.remotePasses/bwI);
+    const disp=Math.max(Math.max(egN,inN)*H*2/bwN,Math.max(egX,inX)*H*2/bwI);
+    const dispMeta=Math.max(Math.max(egN*H*2+metaEgN,inN*H*2+metaInN)/bwN,
+      Math.max(egX*H*2+metaEgX,inX*H*2+metaInX)/bwI);
+    const pref=Math.max(Math.max(wEgN,wInN)*wtB/bwN,Math.max(wEgX,wInX)*wtB/bwI);
+    per.push({eg:egN+egX,inn:inN+inX,egX,inX,dups,groups,uniq,padded:paddedRows[r],
+      overflow,overflowIn:overflowInN+overflowInX,overflowEg:overflowEgN+overflowEgX,
+      wEg:wEgN+wEgX,wIn:wInN+wInX,gemm:6*paddedRows[r]*H*Hp/F,
+      disp,dispMeta,epi:(dups+groups)*H*2/HBM,pro:(dups+2*groups)*H*2/HBM,pref,
+      copyHidden:2*NvS*H*2/HBM,copyRoute:2*NvS*4/HBM,
+      grdNet:isInfer()?0:2*pref,
+      grdLocal:isInfer()?0:(2*reducedExperts.size+wInN+wInX)*3*H*Hp*4/HBM});
+  }
+  const phases=[];
+  let cursor=0;
+  const add=(key,name,color,cost,tip)=>{
+    const times=per.map(cost), duration=Math.max(...times);
+    phases.push({key,name,color,times,start:cursor,end:cursor+duration,duration,tip});
+    cursor+=duration;
+  };
+  add('plan','planning estimate','--s7',()=>20e-6,'Fixed 20 µs assumption; synchronization latency is omitted.');
+  add('fd','dispatch + route weights','--s1',p=>p.dispMeta,'Deduplicated BF16 hidden rows and one fp32 route weight per entry; network payload cost only.');
+  add('fe','duplicate expansion','--s3',p=>p.epi,'Read one primary per duplicate group; write each duplicate row.');
+  add('fc','save independent dispatch outputs','--s3',p=>p.copyHidden+p.copyRoute,'Full NvS hidden and route-weight boundary copies, including read and write bytes. Retained for backward in training.');
+  add('fp','prefetch weights','--s2',p=>p.pref,'One complete expert weight payload per selected foreign expert, including scales for MXFP4.');
+  add('fg','forward GEMMs + overflow reads','--s5',p=>p.gemm+p.overflow,'6·padded rows·H·H′ FLOPs plus additive remote weight-read service cost for unprefetched experts. Weight rereads follow the sensitivity control; nonlinearities excluded.');
+  add('fs','stage expert outputs','--s3',p=>p.copyHidden,'Copy the independent expert output into the communication shard.');
+  add('fr','fold duplicate outputs','--s3',p=>p.pro,'Read primary and duplicate rows; write each folded primary.');
+  add('fo','combine outputs','--s1',p=>p.disp,'Hidden payload returns in the reverse direction; no route-weight gather in this forward schedule.');
+  const fwd=cursor;
+  if(!isInfer()){
+    add('bd','dispatch output gradients','--s1',p=>p.disp,'Reuse the saved plan; planning is skipped, API pre-sync still defaults to true. Sync latency is omitted.');
+    add('be','expand gradient copies','--s3',p=>p.epi,'Expand duplicate gradient rows locally.');
+    add('bc','copy dispatched gradients','--s3',p=>p.copyHidden,'Independent expert-output gradients; preserve the saved forward input.');
+    add('bp','re-prefetch backward weights','--s2',p=>p.pref,'Restore weights assuming shared slots may have been overwritten by another layer.');
+    add('bg','backward matmuls dX + dW','--s5',p=>2*p.gemm,'Twice forward matmul FLOPs; assumes saved forward activations. Nonlinear and route-weight derivative compute is excluded.');
+    add('bs','stage hidden / route gradients','--s3',p=>p.copyHidden+p.copyRoute,'Copy expert hidden gradients and one fp32 route-weight gradient per expert row into the shard.');
+    add('br','fold duplicate gradients','--s3',p=>p.pro,'Sum duplicate hidden gradients into primary rows.');
+    add('bo','combine hidden / route gradients','--s1',p=>p.dispMeta,'Return hidden payload and gather per-entry fp32 route-weight gradients.');
+    add('gn','reduce_grad remote reads','--s2',p=>p.grdNet,'FP32 gradient payload is twice BF16 weight payload. Included in the total; no automatic overlap.');
+    add('gl','reduce_grad accumulate / clear','--s3',p=>p.grdLocal,'Logical local owner-gradient read/write and consumed-slot clear bytes. Remote and local work are serialized by this model; real kernels pipeline them.');
+  }
+  return {per,phases,fwd,bwd:cursor-fwd,total:cursor,wtB,NvS};
 }
 function renderRankTime(){
-  const st=flowState; if(!st)return;
-  const svg=$('#rankTime'); if(!svg)return;
-  const {R}=st, {nvl,ib}=FLOW;
-  const M=rtModel(nvl*1e9,ib*1e9);
-  const {per,segC,segB,maxDisp,maxC,maxB2,tPlan}=M;
+  if(!flowState)return;
+  const svg=$('#rankTime'), {R}=flowState, M=rtModel(FLOW.nvl*1e9,FLOW.ib*1e9);
   $('#rtFwd').textContent=fmtT(M.fwd);
   $('#rtBwd').textContent=isInfer()?'—':fmtT(M.bwd);
   $('#rtTot').textContent=fmtT(M.total);
-  const rows=per.map((p,r)=>{
-    const segs=[];
-    const add=(n,t,c,x)=>{if(t>1e-9)segs.push({n,t,c,x:x||''});};
-    add('planning + sync',tPlan,'--s7','one warp balances R counters; plan multicast to all ranks');
-    add('dispatch',p.disp,'--s1',`egress ${fmtN(p.eg)} rows (${fmtN(p.egX)} cross-node), ingress ${fmtN(p.inn)} (${fmtN(p.inX)}); intra \u00f7 NVLink \u2225 inter \u00f7 IB`);
-    add('barrier wait',maxDisp-p.disp,'wait','dispatch exit barrier \u2014 waiting for the busiest rank');
-    add('epilogue',p.epi,'--s3',`${fmtN(p.dups)} dup rows fanned out on local HBM`);
-    add('prefetch',p.pref,'--s2',`${p.wEg} copies sent (${p.wEgX} cross-node), ${p.wIn} received (${p.wInX}), \u00d7 ${fmtB(M.wtB)}; intra \u00f7 NVLink \u2225 inter \u00f7 IB`);
-    add('GEMM',p.gemm,'--s5','2\u00b7S\u00b7K\u00b7H\u00b7H\u2032\u00b73 FLOPs \u2014 identical on every rank, by construction');
-    add('prologue',p.pro,'--s3','dup rows folded back in, local HBM');
-    add('barrier wait',maxC-segC(p),'wait','combine entry barrier');
-    add('combine',p.disp,'--s1','same rows pulled back, opposite direction');
-    add('barrier wait',maxDisp-p.disp,'wait','forward ends when the slowest combine finishes');
-    if(!isInfer()){
-      add('re-dispatch grads',p.disp,'--s1','plan reused \u2014 no sync, no planning kernel');
-      add('barrier wait',maxDisp-p.disp,'wait','grad shards published');
-      add('epilogue',p.epi,'--s3','grad replicated to dup slots');
-      add('GEMM dX + dW',2*p.gemm,'--s5','backward is two GEMMs');
-      add('prologue',p.pro,'--s3','dup grads folded in');
-      add('barrier wait',maxB2-segB(p),'wait','combine entry (backward)');
-      add('combine grads',p.disp,'--s1','+ route-weight gather');
-      add('barrier wait',maxDisp-p.disp,'wait','backward ends');
-      add('reduce_grad',p.grd,'grd',`${Math.max(p.wEg,p.wIn)} slot${Math.max(p.wEg,p.wIn)===1?'':'s'} \u00d7 2\u00d7${fmtB(M.wtB)} fp32 \u2014 off the critical path, overlaps the next layer`);
-    }
-    const busy=tPlan+2*p.disp+segC(p)+(isInfer()?0:p.disp+segB(p)+p.disp);
-    return {segs,busy,wait:M.total-busy};
-  });
-  $('#rtWait').textContent=(100*rows.reduce((a,x)=>a+x.wait,0)/rows.length/M.total).toFixed(1)+'%';
-  const critD=per.reduce((b,p,r)=>p.disp>per[b].disp?r:b,0);
-  const critC=per.reduce((b,p,r)=>segC(p)>segC(per[b])?r:b,0);
-  $('#rtNote').innerHTML=`Critical ranks: ${rankSw(critD)}r${critD} sets the dispatch/combine phases `+
-    `(heaviest token traffic); ${rankSw(critC)}r${critC} sets the forward compute phase (prefetch + GEMM). `+
-    `Every bar ends at the same instant because of the barriers; what the balance actually guarantees is the GEMM segment \u2014 identical on every rank. The gray is what the lighter ranks pay for it.`+
-    (isInfer()?' Inference: no backward pass, no reduce_grad.':' reduce_grad (faded) extends past the end because it overlaps the next layer\u2019s compute.');
+  const waits=M.per.map((p,r)=>M.phases.reduce((sum,ph)=>sum+ph.duration-ph.times[r],0));
+  $('#rtWait').textContent=(100*waits.reduce((a,b)=>a+b,0)/R/M.total).toFixed(1)+'%';
+  const critC=M.per.reduce((best,p,r)=>p.gemm>M.per[best].gemm?r:best,0);
+  $('#rtNote').innerHTML=`Real entries are ${fmtN(flowState.N)} per rank; padded GEMM rows range from `+
+    `${fmtN(Math.min(...flowState.paddedRows))} to ${fmtN(Math.max(...flowState.paddedRows))}. `+
+    `Rank ${critC} has the largest modeled GEMM work. Every phase is aligned by model convention; gray includes imposed scheduling boundaries. `+
+    (isInfer()?`Forward-only scenario: B = ${flowState.B}, ${flowState.wOverflow.length} overflow expert segments. GEMM bars include additive remote-read costs at ${FLOW.remotePasses} assumed weight pass(es).`:'Backward includes weight restoration and gradient reduction. No communication/compute overlap is assumed.');
   const W=svg.clientWidth||900, rowH=20, gap=6, padL=40, padT=18, padR=64;
-  const maxGrd=Math.max(...per.map(p=>p.grd));
-  const span=M.total+maxGrd;
   const Hh=padT+R*(rowH+gap)+22;
-  svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`); svg.setAttribute('height',Hh); svg.innerHTML='';
-  const ns='http://www.w3.org/2000/svg';
-  const mk=(t,at)=>{const e=document.createElementNS(ns,t);for(const k in at)e.setAttribute(k,at[k]);svg.appendChild(e);return e;};
-  const X=t=>padL+(W-padL-padR)*t/span;
-  let step=span*80/(W-padL-padR);
-  const pow=10**Math.floor(Math.log10(step)); const m0=step/pow;
-  step=(m0<=1?1:m0<=2?2:m0<=5?5:10)*pow;
-  for(let t=0;t<=span;t+=step){
-    mk('line',{x1:X(t),x2:X(t),y1:padT-4,y2:Hh-16,stroke:'var(--grid)','stroke-width':1});
-    const tx=mk('text',{x:X(t)+2,y:padT-7,class:'axis-label'});tx.textContent=fmtT(t);
+  svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`);svg.setAttribute('height',Hh);svg.innerHTML='';
+  const mk=(tag,attrs)=>{const el=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const k in attrs)el.setAttribute(k,attrs[k]);svg.appendChild(el);return el;};
+  const X=t=>padL+(W-padL-padR)*t/M.total;
+  const rawStep=M.total*80/(W-padL-padR), pow=10**Math.floor(Math.log10(rawStep)), m=rawStep/pow;
+  const step=(m<=1?1:m<=2?2:m<=5?5:10)*pow;
+  for(let t=0;t<=M.total;t+=step){
+    mk('line',{x1:X(t),x2:X(t),y1:padT-4,y2:Hh-16,stroke:'var(--grid)'});
+    mk('text',{x:X(t)+2,y:padT-7,class:'axis-label'}).textContent=fmtT(t);
   }
-  mk('line',{x1:X(M.fwd),x2:X(M.fwd),y1:padT-4,y2:Hh-16,stroke:'var(--ink-2)','stroke-width':1,'stroke-dasharray':'4 3',opacity:.7});
-  if(!isInfer())mk('line',{x1:X(M.total),x2:X(M.total),y1:padT-4,y2:Hh-16,stroke:'var(--ink-2)','stroke-width':1.4,opacity:.8});
-  rows.forEach((row,r)=>{
+  M.per.forEach((p,r)=>{
     const y=padT+r*(rowH+gap);
-    const lb=mk('text',{x:padL-6,y:y+rowH/2+4,'text-anchor':'end','font-size':11,'font-weight':700,fill:'var(--ink)'});lb.textContent='r'+r;
-    let t0=0;
-    row.segs.forEach(sg=>{
-      const x=X(t0), w=Math.max(X(t0+sg.t)-X(t0),0.8);
-      const fill=sg.c==='wait'?'var(--grid)':sg.c==='grd'?'var(--s2)':`var(${sg.c})`;
-      const rc=mk('rect',{x,y,width:w,height:rowH,fill,opacity:sg.c==='grd'?.38:.95});
-      rc.addEventListener('mousemove',ev=>showTT(ev,`<div class="tt-t">r${r} \u00b7 ${sg.n}</div><div class="tt-v">${fmtT(sg.t)} (${(100*sg.t/M.total).toFixed(1)}% of total)</div>${sg.x?`<div>${sg.x}</div>`:''}`));
-      rc.addEventListener('mouseleave',hideTT);
-      t0+=sg.t;
+    mk('text',{x:padL-6,y:y+14,'text-anchor':'end','font-size':11,fill:'var(--ink)'}).textContent='r'+r;
+    const rect=(a,b,color,name,tip)=>{
+      if(b<=a)return;
+      const el=mk('rect',{x:X(a),y,width:X(b)-X(a),height:rowH,fill:`var(${color})`});
+      el.addEventListener('mousemove',ev=>showTT(ev,`<div class="tt-t">r${r} · ${name}</div><div class="tt-v">${fmtT(b-a)}</div><div>${tip}</div>`));
+      el.addEventListener('mouseleave',hideTT);
+    };
+    M.phases.forEach(ph=>{
+      rect(ph.start,ph.start+ph.times[r],ph.color,ph.name,ph.tip+(ph.key==='fg'?` Compute: ${fmtT(p.gemm)}; remote-read service: ${fmtT(p.overflow)}.`:''));
+      rect(ph.start+ph.times[r],ph.end,'--grid','scheduled idle','Wait imposed by simultaneous phase boundaries; not necessarily a hardware barrier.');
     });
-    const wl=mk('text',{x:W-padR+6,y:y+rowH/2+4,'font-size':10,fill:'var(--muted)'});
-    wl.textContent='waits '+(100*row.wait/M.total).toFixed(0)+'%';
+    mk('text',{x:W-padR+6,y:y+14,'font-size':10,fill:'var(--muted)'}).textContent=(100*waits[r]/M.total).toFixed(0)+'% idle';
   });
-  const fl=mk('text',{x:X(M.fwd)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'});fl.textContent='fwd ends';
-  if(!isInfer()){const tl=mk('text',{x:X(M.total)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'});tl.textContent='bwd ends';}
-  lastRT={M,critC};
-  renderMemChart();
+  mk('line',{x1:X(M.fwd),x2:X(M.fwd),y1:padT-4,y2:Hh-16,stroke:'var(--ink-2)','stroke-dasharray':'4 3'});
+  mk('text',{x:X(M.fwd)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'}).textContent='fwd ends';
+  if(!isInfer())mk('text',{x:X(M.total)-3,y:Hh-4,'text-anchor':'end',class:'axis-label'}).textContent='bwd + reduce ends';
+  lastRT={M,critC};renderTradeoff(M);renderMemChart();
 }
-/* ---- memory over time: static reservations + occupancy, aligned to the timeline ---- */
+/* Logical tensor storage only. Physical VMM/multicast granularity is device-dependent. */
 let lastRT=null;
-function renderMemChart(){
-  const st=flowState; if(!st||!lastRT)return;
-  const svg=$('#memChart'); if(!svg)return;
-  const {M,critC}=lastRT, {per,tPlan,maxDisp,maxC,maxB2}=M;
-  const {R,epn}=st, {H,Hp}=FLOW, train=!isInfer();
-  const wPB=isInfer()?0.53125:2, expB=3*H*Hp;
-  const NvS=st.N+127*2*epn;                       // api.py: S·K + (token_padding−1)·2·epn
-  const maxWIn=Math.max(0,...Array.from({length:R},(_,r)=>st.wArrows.filter(a=>a.to===r).length));
-  // static pools, bottom-up (reserved at t=0, constant forever)
-  const pools=[
-    {n:'expert weights (own shard)',b:epn*expB*wPB,c:'--baseline',
-     t:`rows [0,E) shard: ${epn} experts × 3·H·H′ × ${wPB} B (${precTag()}) — this rank's parameters, mapped to peers via symmetric memory`},
-    {n:'prefetch slot pool',b:epn*expB*wPB,c:'--s2',
-     t:`rows [E,E+B): B = epn = ${epn} slots × 3·H·H′ × ${wPB} B — process-global, shared by ALL layers, so this is the whole model's bill (README:54). One-donor-per-receiver is the proof it suffices`},
-    {n:'hidden_buf',b:NvS*H*2,c:'--s1',
-     t:`[NvS, H] bf16 dispatch buffer: NvS = S·K + 127·2·epn = ${fmtN(NvS)} rows (segment-padding bound, api.py:281–287). A copy-free DeepEP path would need S·K·R rows here — ${R}×`},
-    {n:'meta_buf',b:(2*NvS+3*st.N+R*st.E)*4,c:'--s7',
-     t:`int32 scratch: route weights alias, tpe gather [R·E], planning staging, dedup src_info — all statically carved (api.py docstring)`},
-  ];
+function memoryModel(M,rank){
+  const {R,E,epn,N,B}=flowState, {H,Hp,S,K}=FLOW, NvS=M.NvS, train=!isInfer();
+  const round4=n=>Math.ceil(n/4)*4, expElems=3*H*Hp;
+  const tpeOff=round4(NvS), planOff=round4(tpeOff+R*E);
+  const staging=3*E*R+3*R*(E+B)+B*R+2*R;
+  const topkOff=round4(planOff+staging);
+  const metaBytes=(topkOff+3*round4(N)+3+NvS)*4;
+  const scratchBytes=4*(E*R+R+R*R+E*Math.ceil(N/2048)+2+2*R*S+R*S*K);
+  const planBytes=4*(round4(N)+round4(E+B)+round4(R*B)+round4(2*(E+B))+
+    round4(2)+round4(3*NvS)+round4(NvS)+round4(2));
+  const ph=Object.fromEntries(M.phases.map(p=>[p.key,p]));
+  const bands=[];
+  const add=(n,b,c,start,end,persistent,t)=>{if(end>start)bands.push({n,b,c,start,end,persistent,t});};
+  const persistent=(n,b,c,t)=>add(n,b,c,0,M.total,true,t);
+  persistent('layer expert weights',epn*expElems*(isInfer()?0.53125:2),'--baseline',`${epn} owned experts × 3·H·H′ × ${isInfer()?0.53125:2} B. Per layer; peer mappings add virtual addresses, not R physical copies.`);
+  persistent('shared prefetch pool',B*expElems*(isInfer()?0.53125:2),'--s2',`B = ${B} slots per projection. May be shared across layers with compatible formats and serialized lifetimes; ${M.per[rank].wIn} slots selected on r${rank}.`);
+  persistent('hidden communication buffer',NvS*H*2,'--s1',`NvS = SK + 2·(E/R)·127 = ${fmtN(NvS)} logical rows. r${rank} uses ${fmtN(M.per[rank].padded)} padded rows; unused tail contents are undefined. Physical storage uses NvS_padded after VMM alignment.`);
+  persistent('metadata buffer',metaBytes,'--s7','Logical api.py offsets: route weights, tpe gather, full planning staging, three aligned N scratch regions, three barrier slots, and NvS source-info entries. Physical multicast/VMM rounding is excluded.');
+  persistent('local planner / builder scratch',scratchBytes,'--s6','int32: E·R + R + R² + E·ceil(N/2048) + 2 + 2·R·S + R·S·K. Allocated per Buffer.');
   if(train){
-    pools.push({n:'param grads fp32 (own shard)',b:epn*expB*4,c:'--s8',
-      t:`grad rows [0,E): the framework's fp32 grads for this rank's experts — MoonEP requires them contiguous, mirroring the weight layout (README:65)`});
-    pools.push({n:'grad reduce pool fp32',b:epn*expB*4,c:'--s4',
-      t:`[R,B,H,H′] fp32 logical view; each rank physically backs its own [B,H,H′] slice = B × 3·H·H′ × 4 B. Foreign-slot grads land here, owners pull them in reduce_grad (grad_reduce.py:437)`});
+    persistent('layer parameter gradients',epn*expElems*4,'--s8','Owned parameter gradients in fp32, per layer. Distinct from the shared temporary reduce pool. Assumes the framework reserves this storage.');
+    persistent('shared gradient reduce pool',B*expElems*4,'--s4',`Local physical slice B·3·H·H′·4 B. The all-rank logical mapping does not multiply storage by R. r${rank} uses ${M.per[rank].wIn} slots, cleared after owner reads finish.`);
   }
-  const actB=NvS*(3*Hp+H)*2;                      // gate/up/act [NvS,H′]×3 + down out [NvS,H], bf16
-  const p=per[critC], grd=Math.max(...per.map(q=>q.grd));
-  const span=M.total+grd;
-  // phase boundaries (critical compute rank for the sub-windows)
-  const dsp0=tPlan, dsp1=tPlan+maxDisp;
-  const gemF0=dsp1+p.epi+p.pref, gemF1=gemF0+p.gemm;
-  const fwd=M.fwd;
-  const gemB0=fwd+maxDisp+p.epi, gemB1=gemB0+2*p.gemm;
-  const bwdC1=fwd+maxDisp+maxB2;
-  const W=svg.clientWidth||900, Hh=250, padL=40, padT=18, padB=20, padR=64;
-  svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`); svg.innerHTML='';
-  const ns='http://www.w3.org/2000/svg';
-  const mk=(t,at)=>{const e=document.createElementNS(ns,t);for(const k in at)e.setAttribute(k,at[k]);svg.appendChild(e);return e;};
-  const X=t=>padL+(W-padL-padR)*t/span;
-  const totB=pools.reduce((a,q)=>a+q.b,0);
-  const yMax=(totB+actB)*1.06;
-  const Y=b=>padT+(Hh-padT-padB)*(1-b/yMax);
-  // gridlines + GiB ticks
-  const gstep=2**Math.ceil(Math.log2(yMax/2**30/5));
-  for(let g=0;g*gstep*2**30<yMax;g++){
-    const yy=Y(g*gstep*2**30);
-    mk('line',{x1:padL,x2:W-padR,y1:yy,y2:yy,stroke:'var(--grid)','stroke-width':1});
-    const tx=mk('text',{x:padL-4,y:yy+3,'text-anchor':'end',class:'axis-label'});tx.textContent=g*gstep+' GiB';
+  const backwardReadEnd=train?ph.bg.end:ph.fo.end;
+  add('plan + saved cu_seqlens',planBytes,'--s7',0,M.total,false,'Per live forward plan: destinations, all-rank prefetch selections, zero-fill ranges, stats, dedup groups/offsets/counts, and cu_seqlens. Each allocation rounds to four int32s. Retain through backward and reduction.');
+  add('independent dispatched input',NvS*H*2,'--s1',ph.plan.start,backwardReadEnd,false,'Fresh dispatch allocates this output before launching. The full NvS hidden copy is independent of communication storage and remains valid for dW.');
+  add('saved dispatched route weights',NvS*4,'--s7',ph.plan.start,backwardReadEnd,false,'Fresh forward dispatch allocates NvS fp32 route weights. Independent storage, retained for framework backward.');
+  add('saved gate / up / activation',NvS*3*Hp*2,'--s5',ph.fg.start,backwardReadEnd,false,'Illustrative framework allocation: three [NvS,H′] BF16 tensors, retained through backward matmuls in training. No activation recomputation is assumed.');
+  add('expert forward output',NvS*H*2,'--s5',ph.fg.start,ph.fo.end,false,'Independent [NvS,H] BF16 expert output; staged into the communication shard before combine.');
+  add('token-major forward output',S*H*2,'--s1',ph.fs.start,M.total,false,'Combine allocates [S,H] BF16 before input staging. Assumed retained until this layer schedule completes.');
+  if(train){
+    add('dispatched output gradient',NvS*H*2,'--s3',ph.bd.start,ph.bg.end,false,'Backward dispatch allocates an independent [NvS,H] BF16 output; its boundary copy is modeled.');
+    add('expert hidden gradient',NvS*H*2,'--s5',ph.bg.start,ph.bo.end,false,'Framework [NvS,H] BF16 dX staged into the communication shard before backward combine.');
+    add('expert route-weight gradient',NvS*4,'--s7',ph.bg.start,ph.bo.end,false,'Framework NvS fp32 route-weight gradients, copied into metadata storage before gather. Derivative compute is outside the timing estimate.');
+    add('token-major returned gradients',S*H*2+S*K*4,'--s3',ph.bs.start,M.total,false,'Backward combine allocates [S,H] BF16 hidden gradients and [S,K] fp32 route-weight gradients before staging; retained through reduction.');
   }
-  // time ticks matching the timeline
-  let step=span*80/(W-padL-padR);
-  const pw=10**Math.floor(Math.log10(step)); const m0=step/pw;
-  step=(m0<=1?1:m0<=2?2:m0<=5?5:10)*pw;
-  for(let t=0;t<=span;t+=step){
-    mk('line',{x1:X(t),x2:X(t),y1:padT-4,y2:Hh-padB,stroke:'var(--grid)','stroke-width':1});
-    const tx=mk('text',{x:X(t)+2,y:padT-7,class:'axis-label'});tx.textContent=fmtT(t);
+  const times=[...new Set([0,M.total,...bands.flatMap(b=>[b.start,b.end])])].sort((a,b)=>a-b);
+  const intervals=times.slice(0,-1).map((start,i)=>({start,end:times[i+1],bands:bands.filter(b=>b.start<=start&&b.end>start)}));
+  const peak=Math.max(...intervals.map(v=>v.bands.reduce((sum,b)=>sum+b.b,0)));
+  return {bands,intervals,peak,metaBytes,scratchBytes,planBytes};
+}
+function renderMemChart(){
+  if(!flowState||!lastRT)return;
+  const {M,critC:rank}=lastRT, model=memoryModel(M,rank), svg=$('#memChart');
+  const W=svg.clientWidth||900, Hh=300, padL=40,padR=64,padT=18,padB=24;
+  svg.setAttribute('viewBox',`0 0 ${W} ${Hh}`);svg.setAttribute('height',Hh);svg.innerHTML='';
+  const mk=(tag,attrs)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const k in attrs)e.setAttribute(k,attrs[k]);svg.appendChild(e);return e;};
+  const X=t=>padL+(W-padL-padR)*t/M.total, Y=b=>padT+(Hh-padT-padB)*(1-b/(model.peak*1.06));
+  const gstep=2**Math.ceil(Math.log2(model.peak/2**30/5));
+  for(let g=0;g*gstep*2**30<=model.peak;g++){
+    const y=Y(g*gstep*2**30);
+    mk('line',{x1:padL,x2:W-padR,y1:y,y2:y,stroke:'var(--grid)'});
+    mk('text',{x:padL-4,y:y+3,'text-anchor':'end',class:'axis-label'}).textContent=+(g*gstep).toFixed(3)+' GiB';
   }
-  mk('line',{x1:X(fwd),x2:X(fwd),y1:padT-4,y2:Hh-padB,stroke:'var(--ink-2)','stroke-width':1,'stroke-dasharray':'4 3',opacity:.7});
-  if(train)mk('line',{x1:X(M.total),x2:X(M.total),y1:padT-4,y2:Hh-padB,stroke:'var(--ink-2)','stroke-width':1.4,opacity:.8});
-  const hover=(el,tt)=>{el.addEventListener('mousemove',ev=>showTT(ev,tt));el.addEventListener('mouseleave',hideTT);};
-  // occupancy windows per pool: [t0 ramp-start, t1 full, t2 release], frac of band
-  const occ={
-    'hidden_buf':{t0:dsp0,t1:dsp1,t2:train?M.total:fwd,f:st.N/NvS,
-      w:`filled by dispatch, read by the GEMM, saved as hidden_nvsh for backward dW, reused zero-copy for the grad re-dispatch — released after ${train?'backward combine':'combine'}`},
-    'prefetch slot pool':{t0:dsp1+p.epi,t1:dsp1+p.epi+p.pref,t2:train?M.total:fwd,f:maxWIn/Math.max(1,epn),
-      w:`this routing fills ${maxWIn} of ${epn} slots on the busiest receiver — the reservation is the worst case the invariant allows`},
-    'grad reduce pool fp32':train?{t0:gemB1,t1:bwdC1,t2:M.total+grd,f:maxWIn/Math.max(1,epn),
-      w:`dW for ${maxWIn} foreign slot${maxWIn===1?'':'s'} lands here after the backward GEMM; owners pull and slots are cleared by reduce_grad`}:null,
-  };
-  let cum=0;
-  pools.forEach(q=>{
-    const y1=Y(cum+q.b), y0=Y(cum), hgt=y0-y1;
-    const band=mk('rect',{x:padL,y:y1,width:W-padL-padR,height:hgt,fill:`var(${q.c})`,opacity:.28});
-    hover(band,`<div class="tt-t">${q.n} — reserved at t = 0</div><div class="tt-v">${fmtB(q.b)}</div><div>${q.t}</div>`);
-    const o=occ[q.n];
-    if(o&&o.f>0){
-      const oh=Math.max(1.5,hgt*Math.min(1,o.f));
-      const pts=`${X(o.t0)},${y0} ${X(o.t1)},${y0-oh} ${X(o.t2)},${y0-oh} ${X(o.t2)},${y0}`;
-      const poly=mk('polygon',{points:pts,fill:`var(${q.c})`,opacity:.9});
-      hover(poly,`<div class="tt-t">${q.n} — occupancy</div><div class="tt-v">${fmtB(q.b*Math.min(1,o.f))} of ${fmtB(q.b)}</div><div>${o.w}</div>`);
-    }
-    if(hgt>13){const lb=mk('text',{x:W-padR-6,y:(y0+y1)/2+3.5,'text-anchor':'end','font-size':10.5,fill:'var(--ink-2)'});lb.textContent=`${q.n} · ${fmtB(q.b)}`;}
-    cum+=q.b;
+  model.intervals.forEach(interval=>{
+    let base=0;
+    interval.bands.forEach(b=>{
+      const el=mk('rect',{x:X(interval.start),y:Y(base+b.b),width:X(interval.end)-X(interval.start),height:Y(base)-Y(base+b.b),fill:`var(${b.c})`,opacity:b.persistent?.35:.85});
+      el.addEventListener('mousemove',ev=>showTT(ev,`<div class="tt-t">r${rank} · ${b.n}</div><div class="tt-v">${fmtB(b.b)} logical bytes</div><div>${b.t}</div><div>Modeled lifetime: ${fmtT(b.start)}–${fmtT(b.end)}</div>`));
+      el.addEventListener('mouseleave',hideTT);base+=b.b;
+    });
   });
-  // transient framework GEMM activations on top of the stack
-  const yA0=Y(cum), yA1=Y(cum+actB);
-  const wins=train?[[gemF0,fwd],[gemB0,bwdC1]]:[[gemF0,fwd]];
-  wins.forEach(([a,b])=>{
-    const r=mk('rect',{x:X(a),y:yA1,width:Math.max(1,X(b)-X(a)),height:yA0-yA1,fill:'var(--s5)',opacity:.75});
-    hover(r,`<div class="tt-t">framework GEMM activations (not MoonEP's)</div><div class="tt-v">${fmtB(actB)}</div><div>gate/up/act [NvS,H′] + down out [NvS,H] bf16 — the only memory that appears and disappears; drawn recompute-style, a framework that saves them for backward keeps this band alive through to the backward GEMM</div>`);
-  });
-  const fl=mk('text',{x:X(fwd)-3,y:Hh-6,'text-anchor':'end',class:'axis-label'});fl.textContent='fwd ends';
-  if(train){const tl=mk('text',{x:X(M.total)-3,y:Hh-6,'text-anchor':'end',class:'axis-label'});tl.textContent='bwd ends';}
-  $('#memLeg').innerHTML=pools.map(q=>`<span class="li" style="--lc:var(${q.c})">${q.n}</span>`).join('')+
-    `<span class="li" style="--lc:var(--s5)">framework GEMM activations (transient)</span>`;
-  $('#memNote').innerHTML=`Total static reservation on this rank: <b>${fmtB(totB)}</b>`+
-    ` — of which the prefetch slot pool${train?' and both fp32 grad pools are':' is'} paid <b>once per process</b>, not per layer.`+
-    ` The K3 report's DeepEP contrast lives in the blue band: a copy-free dynamic path needs an S·K·R-row buffer where MoonEP's perfect balance needs S·K(+padding) — ${R}× less.`+
-    (train?'':' Inference: no grad pools, and B can shrink to 3–4 slots (README:59), collapsing the orange band.');
+  for(const [t,label] of [[0,'0'],[M.fwd,'fwd ends'],...(!isInfer()?[[M.total,'bwd + reduce ends']]:[])]){
+    mk('line',{x1:X(t),x2:X(t),y1:padT,y2:Hh-padB,stroke:'var(--ink-2)','stroke-dasharray':'4 3'});
+    mk('text',{x:X(t),y:Hh-6,'text-anchor':t===0?'start':'end',class:'axis-label'}).textContent=label;
+  }
+  $('#memLeg').innerHTML=model.bands.map(b=>`<span class="li" style="--lc:var(${b.c})">${b.n} · ${fmtB(b.b)}</span>`).join('');
+  const ratio=flowState.R*flowState.N/M.NvS;
+  $('#memNote').innerHTML=`Rank <b>${rank}</b> (largest modeled GEMM): peak of included logical tensors <b>${fmtB(model.peak)}</b>. `+
+    `Parameters and their gradients are per layer; only prefetch and temporary reduction slots are shared under the stated pool policy. `+
+    `The RS·K versus NvS logical communication-buffer ratio is ${ratio.toFixed(2)}×, with padding included. `+
+    `Caller inputs, upstream gradients, optimizer state, other layers/live microbatches, backend workspaces, and allocation rounding are excluded. `+
+    `The API creates new plans and output tensors; these bands do not imply allocation-free execution. `+
+    (isInfer()?`Inference reserves B = ${flowState.B} slots; ${flowState.wOverflow.length} overflow segments use remote weights during GEMM. Token capacity and padding do not shrink with B.`:'Saved activations remain independent of the communication buffer until backward finishes reading them.');
 }
 bindParams('#flowParams',FLOW,renderFlow);
 $('#flowskew').addEventListener('input',renderFlow);
+$('#sharedTF').addEventListener('input',()=>{OVERLAP.tf=+$('#sharedTF').value;renderTradeoff(lastRT.M);});
+$('#overlapWindow').addEventListener('input',()=>{OVERLAP.eta=+$('#overlapWindow').value/100;renderTradeoff(lastRT.M);});
+$('#overlapK3').onclick=()=>applyPreset(PRESETS.psK3);
+$('#slotBudget').addEventListener('input',()=>{if(isInfer()){FLOW.BInfer=+$('#slotBudget').value;renderFlow();}});
+$('#remotePasses').addEventListener('input',()=>{if(isInfer()){FLOW.remotePasses=+$('#remotePasses').value;renderFlow();}});
+$('#slotsFour').onclick=()=>{if(isInfer()){FLOW.BInfer=4;renderFlow();}};
+$('#slotsFull').onclick=()=>{if(isInfer()){FLOW.BInfer=flowState.epn;renderFlow();}};
 $('#flowReseed').onclick=()=>{flowSeed=(flowSeed*48271)%2147483647;renderFlow();};
 $('#scSkew').onclick=()=>{flowScenario='skew';$('#scSkew').classList.add('on');$('#scHot').classList.remove('on');renderFlow();};
 $('#scHot').onclick=()=>{flowScenario='hot';$('#scHot').classList.add('on');$('#scSkew').classList.remove('on');renderFlow();};
